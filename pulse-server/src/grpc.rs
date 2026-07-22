@@ -4,8 +4,8 @@ use std::pin::Pin;
 
 use futures::Stream;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{error, info, warn};
 
@@ -31,8 +31,7 @@ impl MonitoringServiceImpl {
 
 #[tonic::async_trait]
 impl MonitoringService for MonitoringServiceImpl {
-    type StreamTelemetryStream =
-        Pin<Box<dyn Stream<Item = Result<ServerCommand, Status>> + Send>>;
+    type StreamTelemetryStream = Pin<Box<dyn Stream<Item = Result<ServerCommand, Status>> + Send>>;
 
     async fn stream_telemetry(
         &self,
@@ -72,7 +71,8 @@ impl MonitoringService for MonitoringServiceImpl {
                         let timestamp_ms = stats.timestamp_ms;
 
                         // Serialize stats to JSON for storage and broadcast
-                        let stats_json = match serde_json::to_value(StatsSerializable::from(&stats)) {
+                        let stats_json = match serde_json::to_value(StatsSerializable::from(&stats))
+                        {
                             Ok(v) => v,
                             Err(e) => {
                                 error!(error = %e, "failed to serialize stats");

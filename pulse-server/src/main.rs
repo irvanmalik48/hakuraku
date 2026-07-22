@@ -29,7 +29,7 @@ use tower::timeout::TimeoutLayer;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{Instrument, info};
 
 use pulse_core::MonitoringServiceServer;
 use pulse_core::auth::AuthInterceptor;
@@ -132,100 +132,114 @@ async fn main() -> Result<()> {
         None
     };
 
-    let (ingestion_tx, ingestion_rx) =
-        tokio::sync::mpsc::channel::<crate::state::IngestionItem>(4096);
-    let shared_rx = std::sync::Arc::new(tokio::sync::Mutex::new(ingestion_rx));
-    let worker_count = 4;
+    // Bounded semaphore to prevent unbounded VM push task spawning (Item 5)
+    let vm_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(64));
+
+    // Sharded per-worker channels to eliminate lock contention (Item 4)
+    let worker_count: usize = 4;
+    let mut worker_txs = Vec::with_capacity(worker_count);
     let mut worker_handles = Vec::new();
 
     for i in 0..worker_count {
-        let rx = shared_rx.clone();
+        let (wtx, mut wrx) = tokio::sync::mpsc::channel::<crate::state::IngestionItem>(1024);
+        worker_txs.push(wtx);
+
         let repo = repo.clone();
         let vm_url = vm_url.clone();
         let vm_client = vm_client.clone();
-        let handle = tokio::spawn(async move {
-            tracing::info!(worker_id = i, "ingestion worker started");
-            loop {
-                let item = {
-                    let mut lock = rx.lock().await;
-                    lock.recv().await
-                };
+        let vm_sem = vm_semaphore.clone();
 
-                let Some(item) = item else {
-                    break;
-                };
+        let handle = tokio::spawn(
+            async move {
+                tracing::info!("ingestion worker started");
+                while let Some(item) = wrx.recv().await {
+                    match item {
+                        crate::state::IngestionItem::Stats {
+                            node_id,
+                            timestamp_ms,
+                            stats_str,
+                            stats_json,
+                        } => {
+                            if let Err(e) = repo.upsert_node(&node_id, &node_id, "online").await {
+                                tracing::error!(error = %e, node_id = %node_id, "worker failed to upsert node");
+                            }
+                            if let Err(e) = repo
+                                .insert_snapshot(&node_id, timestamp_ms, &stats_str)
+                                .await
+                            {
+                                tracing::error!(error = %e, node_id = %node_id, "worker failed to insert snapshot");
+                            }
 
-                match item {
-                    crate::state::IngestionItem::Stats {
-                        node_id,
-                        timestamp_ms,
-                        stats_str,
-                        stats_json,
-                    } => {
-                        if let Err(e) = repo.upsert_node(&node_id, &node_id, "online").await {
-                            tracing::error!(error = %e, node_id = %node_id, "worker failed to upsert node");
-                        }
-                        if let Err(e) = repo
-                            .insert_snapshot(&node_id, timestamp_ms, &stats_str)
-                            .await
-                        {
-                            tracing::error!(error = %e, node_id = %node_id, "worker failed to insert snapshot");
-                        }
-
-                        // Optional VictoriaMetrics push
-                        if let Some(ref client) = vm_client {
-                            let url = vm_url.clone().unwrap();
-                            let client = client.clone();
-                            let payload =
-                                serialize_to_vm_jsonl(&node_id, timestamp_ms, &stats_json);
-                            tokio::spawn(async move {
-                                let res = client
-                                    .post(&url)
-                                    .header("content-type", "application/json")
-                                    .body(payload)
-                                    .send()
-                                    .await;
-                                if let Err(e) = res {
-                                    tracing::error!(error = %e, "failed to send metrics to VictoriaMetrics");
-                                    crate::metrics::DB_ERRORS
-                                        .with_label_values(&["victoriametrics_post"])
-                                        .inc();
+                            // Optional VictoriaMetrics push (bounded by semaphore)
+                            if let Some(ref client) = vm_client {
+                                let url = vm_url.clone().unwrap();
+                                let client = client.clone();
+                                let payload =
+                                    serialize_to_vm_jsonl(&node_id, timestamp_ms, &stats_json);
+                                match vm_sem.clone().try_acquire_owned() {
+                                    Ok(permit) => {
+                                        tokio::spawn(async move {
+                                            let _permit = permit;
+                                            let res = client
+                                                .post(&url)
+                                                .header("content-type", "application/json")
+                                                .body(payload)
+                                                .send()
+                                                .await;
+                                            if let Err(e) = res {
+                                                tracing::error!(error = %e, "failed to send metrics to VictoriaMetrics");
+                                                crate::metrics::DB_ERRORS
+                                                    .with_label_values(&["victoriametrics_post"])
+                                                    .inc();
+                                            }
+                                        });
+                                    }
+                                    Err(_) => {
+                                        tracing::warn!("VM push semaphore full, dropping metric push");
+                                        crate::metrics::DB_ERRORS
+                                            .with_label_values(&["victoriametrics_backpressure"])
+                                            .inc();
+                                    }
                                 }
-                            });
+                            }
                         }
-                    }
-                    crate::state::IngestionItem::ProbeResult {
-                        node_id,
-                        target,
-                        success,
-                        latency_us,
-                        error_message,
-                        timestamp,
-                    } => {
-                        if let Err(e) = repo
-                            .insert_probe_result(
-                                &node_id,
-                                &target,
-                                success,
-                                latency_us,
-                                &error_message,
-                                timestamp,
-                            )
-                            .await
-                        {
-                            tracing::error!(error = %e, node_id = %node_id, "worker failed to insert probe result");
+                        crate::state::IngestionItem::ProbeResult {
+                            node_id,
+                            target,
+                            success,
+                            latency_us,
+                            error_message,
+                            timestamp,
+                        } => {
+                            if let Err(e) = repo
+                                .insert_probe_result(
+                                    &node_id,
+                                    &target,
+                                    success,
+                                    latency_us,
+                                    &error_message,
+                                    timestamp,
+                                )
+                                .await
+                            {
+                                tracing::error!(error = %e, node_id = %node_id, "worker failed to insert probe result");
+                            }
                         }
                     }
                 }
+                tracing::info!("ingestion worker shut down");
             }
-            tracing::info!(worker_id = i, "ingestion worker shut down");
-        });
+            .instrument(tracing::info_span!("ingestion_worker", id = i)),
+        );
         worker_handles.push(handle);
     }
 
+    // Wrap senders in Arc for shared access from gRPC handler
+    let worker_txs = std::sync::Arc::new(worker_txs);
+
     // ── Shared State ────────────────────────────────────────────────────────
 
-    let app_state = AppState::new(pool.clone(), ingestion_tx);
+    let app_state = AppState::new(pool.clone(), worker_txs);
 
     // Load existing nodes from database to populate in-memory state
     match repo.get_all_nodes().await {
@@ -276,7 +290,11 @@ async fn main() -> Result<()> {
 
                     crate::metrics::NODES_ONLINE.set(online as f64);
                     crate::metrics::NODES_OFFLINE.set(offline as f64);
-                    crate::metrics::INGESTION_DEPTH.set((4096 - liveness_state.ingestion_tx.capacity()) as f64);
+                    crate::metrics::INGESTION_DEPTH.set(
+                        liveness_state.worker_txs.iter()
+                            .map(|tx| (1024 - tx.capacity()) as f64)
+                            .sum::<f64>()
+                    );
 
                     for (node_id, last_seen, latest_stats) in transitions {
                         // Persist offline status to database

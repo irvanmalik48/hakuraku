@@ -1,0 +1,138 @@
+syntax = "proto3";
+
+package pulse;
+
+// ─── System Telemetry Messages ──────────────────────────────────────────────
+
+/// Snapshot of a node's system metrics at a single point in time.
+message NodeStats {
+  /// Unique node identifier (configured per-agent).
+  string node_id = 1;
+
+  /// Unix timestamp in milliseconds when this snapshot was taken.
+  int64 timestamp_ms = 2;
+
+  // ── CPU ──
+  /// Overall CPU usage as a percentage [0.0, 100.0].
+  double cpu_percent = 10;
+  /// Per-core CPU usage percentages.
+  repeated double cpu_per_core = 11;
+
+  // ── Load Average ──
+  double load_avg_1 = 20;
+  double load_avg_5 = 21;
+  double load_avg_15 = 22;
+
+  // ── Memory (bytes) ──
+  uint64 mem_total = 30;
+  uint64 mem_used = 31;
+  uint64 mem_free = 32;
+  uint64 mem_available = 33;
+  uint64 mem_buffers = 34;
+  uint64 mem_cached = 35;
+  uint64 swap_total = 36;
+  uint64 swap_used = 37;
+
+  // ── Disk I/O (bytes per second, aggregated) ──
+  uint64 disk_read_bytes_sec = 40;
+  uint64 disk_write_bytes_sec = 41;
+
+  // ── Network I/O ──
+  repeated NetworkInterface net_interfaces = 50;
+
+  // ── Connections ──
+  uint32 tcp_connections = 60;
+  uint32 udp_connections = 61;
+
+  // ── System ──
+  uint64 uptime_seconds = 70;
+
+  // ── Thermal ──
+  repeated TemperatureSensor temperatures = 80;
+}
+
+/// Per-interface network counters.
+message NetworkInterface {
+  string name = 1;
+  uint64 rx_bytes_sec = 2;
+  uint64 tx_bytes_sec = 3;
+  uint64 rx_bytes_total = 4;
+  uint64 tx_bytes_total = 5;
+}
+
+/// Temperature sensor reading.
+message TemperatureSensor {
+  string label = 1;
+  /// Temperature in millidegrees Celsius (e.g., 45000 = 45.0°C).
+  int32 temp_millicelsius = 2;
+}
+
+// ─── Network Probing ────────────────────────────────────────────────────────
+
+/// Target for ICMP ping probing.
+message PingTarget {
+  string host = 1;
+  uint32 count = 2;
+  uint32 timeout_ms = 3;
+}
+
+/// Target for TCP handshake probing.
+message TcpProbe {
+  string host = 1;
+  uint32 port = 2;
+  uint32 timeout_ms = 3;
+}
+
+/// Result of a network probe.
+message ProbeResult {
+  string target = 1;
+  bool success = 2;
+  /// Round-trip time in microseconds.
+  uint64 latency_us = 3;
+  string error_message = 4;
+}
+
+// ─── Heartbeat ──────────────────────────────────────────────────────────────
+
+message Heartbeat {
+  string node_id = 1;
+  int64 timestamp_ms = 2;
+}
+
+message HeartbeatAck {
+  int64 server_timestamp_ms = 1;
+}
+
+// ─── Bidirectional Stream Envelopes ─────────────────────────────────────────
+
+/// Messages sent from Agent → Server.
+message TelemetryMessage {
+  oneof payload {
+    NodeStats stats = 1;
+    Heartbeat heartbeat = 2;
+    ProbeResult probe_result = 3;
+  }
+}
+
+/// Messages sent from Server → Agent.
+message ServerCommand {
+  oneof payload {
+    HeartbeatAck heartbeat_ack = 1;
+    PingTarget add_ping_target = 2;
+    TcpProbe add_tcp_probe = 3;
+    ConfigUpdate config_update = 4;
+  }
+}
+
+/// Dynamic configuration pushed from server to agent.
+message ConfigUpdate {
+  /// Sampling interval in milliseconds.
+  uint32 interval_ms = 1;
+}
+
+// ─── gRPC Service ───────────────────────────────────────────────────────────
+
+service MonitoringService {
+  /// Bidirectional streaming: agent pushes telemetry, server pushes commands.
+  rpc StreamTelemetry (stream TelemetryMessage) returns (stream ServerCommand);
+}

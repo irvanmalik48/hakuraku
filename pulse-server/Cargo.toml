@@ -49,6 +49,11 @@ chrono = { workspace = true }
 # Concurrent map
 dashmap = { workspace = true }
 
+# HTTP client & Metrics
+reqwest = { workspace = true }
+prometheus = { workspace = true }
+tokio-util = { workspace = true }
+
 # Streaming
 tokio-stream = "0.1"
 futures = "0.3"

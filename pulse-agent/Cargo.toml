@@ -34,3 +34,6 @@ tokio-stream = "0.1"
 
 # Env config
 serde = { workspace = true }
+
+# Shutdown support
+tokio-util = { workspace = true }

@@ -1,10 +1,10 @@
 //! Database access layer with repository pattern.
 //!
-//! Currently implements SQLite via `sqlx`. The `NodeRepository` trait
-//! provides an abstraction point for future PostgreSQL support.
+//! Implements PostgreSQL 18 via `sqlx`. The `NodeRepository` trait
+//! provides an abstraction point for future database backends.
 
 use anyhow::Result;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 use crate::state::{NodeInfo, NodeStatus};
 
@@ -50,20 +50,19 @@ pub struct SnapshotRecord {
     pub stats_json: serde_json::Value,
 }
 
-/// SQLite implementation of `NodeRepository`.
+/// PostgreSQL implementation of `NodeRepository`.
 #[derive(Clone)]
-pub struct SqliteNodeRepository {
-    pool: SqlitePool,
+pub struct PostgresNodeRepository {
+    pool: PgPool,
 }
 
-impl SqliteNodeRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+impl PostgresNodeRepository {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
     /// Run embedded migrations.
     pub async fn migrate(&self) -> Result<()> {
-        // Read and execute the migration SQL directly
         let migration_sql = include_str!("../migrations/001_init.sql");
         sqlx::raw_sql(migration_sql)
             .execute(&self.pool)
@@ -73,7 +72,7 @@ impl SqliteNodeRepository {
     }
 }
 
-impl NodeRepository for SqliteNodeRepository {
+impl NodeRepository for PostgresNodeRepository {
     async fn upsert_node(
         &self,
         node_id: &str,
@@ -88,7 +87,7 @@ impl NodeRepository for SqliteNodeRepository {
         sqlx::query(
             r#"
             INSERT INTO nodes (id, hostname, last_seen, status)
-            VALUES (?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT(id) DO UPDATE SET
                 hostname = excluded.hostname,
                 last_seen = excluded.last_seen,
@@ -111,15 +110,17 @@ impl NodeRepository for SqliteNodeRepository {
         timestamp_ms: i64,
         stats_json: &str,
     ) -> Result<()> {
+        let stats_val: serde_json::Value = serde_json::from_str(stats_json).unwrap_or_default();
+
         sqlx::query(
             r#"
             INSERT INTO snapshots (node_id, timestamp, stats_json)
-            VALUES (?, ?, ?)
+            VALUES ($1, $2, $3)
             "#,
         )
         .bind(node_id)
         .bind(timestamp_ms)
-        .bind(stats_json)
+        .bind(stats_val)
         .execute(&self.pool)
         .await?;
 
@@ -136,7 +137,7 @@ impl NodeRepository for SqliteNodeRepository {
 
     async fn get_node(&self, node_id: &str) -> Result<Option<NodeInfo>> {
         let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id, hostname, last_seen, status FROM nodes WHERE id = ?",
+            "SELECT id, hostname, last_seen, status FROM nodes WHERE id = $1",
         )
         .bind(node_id)
         .fetch_optional(&self.pool)
@@ -156,9 +157,9 @@ impl NodeRepository for SqliteNodeRepository {
             r#"
             SELECT node_id, timestamp, stats_json
             FROM snapshots
-            WHERE node_id = ? AND timestamp BETWEEN ? AND ?
+            WHERE node_id = $1 AND timestamp BETWEEN $2 AND $3
             ORDER BY timestamp DESC
-            LIMIT ?
+            LIMIT $4
             "#,
         )
         .bind(node_id)
@@ -173,7 +174,7 @@ impl NodeRepository for SqliteNodeRepository {
             .map(|r| SnapshotRecord {
                 node_id: r.node_id,
                 timestamp: r.timestamp,
-                stats_json: serde_json::from_str(&r.stats_json).unwrap_or_default(),
+                stats_json: r.stats_json,
             })
             .collect();
 
@@ -182,7 +183,7 @@ impl NodeRepository for SqliteNodeRepository {
 
     async fn cleanup_old_snapshots(&self, before_ms: i64) -> Result<u64> {
         let result =
-            sqlx::query("DELETE FROM snapshots WHERE created_at < ?")
+            sqlx::query("DELETE FROM snapshots WHERE created_at < $1")
                 .bind(before_ms)
                 .execute(&self.pool)
                 .await?;
@@ -222,5 +223,5 @@ impl From<NodeRow> for NodeInfo {
 struct SnapshotRow {
     node_id: String,
     timestamp: i64,
-    stats_json: String,
+    stats_json: serde_json::Value,
 }

@@ -71,10 +71,13 @@ impl PostgresNodeRepository {
         Self { pool }
     }
 
-    /// Run embedded migrations.
+    /// Run embedded migrations using sqlx's built-in migration framework.
+    /// Tracks applied versions in `_sqlx_migrations` table to prevent re-running.
     pub async fn migrate(&self) -> Result<()> {
-        let migration_sql = include_str!("../migrations/001_init.sql");
-        sqlx::raw_sql(migration_sql).execute(&self.pool).await?;
+        sqlx::migrate!("./migrations")
+            .run(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("migration failed: {}", e))?;
         tracing::info!("database migrations applied");
         Ok(())
     }

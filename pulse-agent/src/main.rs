@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{Notify, mpsc};
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
@@ -38,8 +38,7 @@ impl Config {
         let auth_secret = std::env::var("PULSE_AUTH_SECRET")
             .context("PULSE_AUTH_SECRET must be set")?
             .into_bytes();
-        let node_id =
-            std::env::var("PULSE_NODE_ID").unwrap_or_else(|_| "unknown".to_string());
+        let node_id = std::env::var("PULSE_NODE_ID").unwrap_or_else(|_| "unknown".to_string());
         let interval_ms: u64 = std::env::var("PULSE_INTERVAL_MS")
             .unwrap_or_else(|_| "1000".to_string())
             .parse()
@@ -227,7 +226,12 @@ async fn run_session(
                     );
                     let tx_clone = tx.clone();
                     tokio::spawn(async move {
-                        let results = prober::probe_tcp_targets(&[(probe.host.clone(), probe.port as u16, probe.timeout_ms)]).await;
+                        let results = prober::probe_tcp_targets(&[(
+                            probe.host.clone(),
+                            probe.port as u16,
+                            probe.timeout_ms,
+                        )])
+                        .await;
                         if let Some(result) = results.into_iter().next() {
                             let msg = TelemetryMessage {
                                 payload: Some(Payload::ProbeResult(result)),
@@ -373,12 +377,8 @@ impl<F: std::future::Future> NowOrNever for F {
 
 fn futures_noop_waker() -> std::task::Waker {
     use std::task::{RawWaker, RawWakerVTable};
-    const VTABLE: RawWakerVTable = RawWakerVTable::new(
-        |p| RawWaker::new(p, &VTABLE),
-        |_| {},
-        |_| {},
-        |_| {},
-    );
+    const VTABLE: RawWakerVTable =
+        RawWakerVTable::new(|p| RawWaker::new(p, &VTABLE), |_| {}, |_| {}, |_| {});
     // SAFETY: The no-op waker does nothing and is always valid.
     unsafe { std::task::Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
 }

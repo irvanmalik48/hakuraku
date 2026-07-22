@@ -15,10 +15,24 @@ CREATE TABLE IF NOT EXISTS snapshots (
     created_at  BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::BIGINT
 );
 
+CREATE TABLE IF NOT EXISTS probe_results (
+    id            BIGSERIAL PRIMARY KEY,
+    node_id       VARCHAR NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target        VARCHAR NOT NULL,
+    success       BOOLEAN NOT NULL,
+    latency_us    BIGINT NOT NULL,
+    error_message VARCHAR NOT NULL DEFAULT '',
+    timestamp     BIGINT NOT NULL
+);
+
 -- Index for time-range queries per node
 CREATE INDEX IF NOT EXISTS idx_snapshots_node_time
     ON snapshots(node_id, timestamp DESC);
 
--- Index for cleanup of old snapshots
-CREATE INDEX IF NOT EXISTS idx_snapshots_created
-    ON snapshots(created_at);
+-- Index for snapshot retention cleanup by telemetry timestamp
+CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp
+    ON snapshots(timestamp);
+
+-- Index for probe history queries per node
+CREATE INDEX IF NOT EXISTS idx_probes_node_time
+    ON probe_results(node_id, timestamp DESC);

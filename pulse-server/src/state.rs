@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tokio::sync::broadcast;
 
 /// Unique node identifier.
@@ -48,8 +48,8 @@ impl std::fmt::Display for NodeStatus {
 /// Shared application state accessible from both gRPC and Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// SQLite connection pool.
-    pub db: SqlitePool,
+    /// PostgreSQL connection pool.
+    pub db: PgPool,
     /// Broadcast channel for real-time WebSocket fan-out.
     pub broadcast_tx: broadcast::Sender<NodeUpdate>,
     /// In-memory node registry for fast lookups.
@@ -57,7 +57,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(db: SqlitePool) -> Self {
+    pub fn new(db: PgPool) -> Self {
         // Buffer up to 256 updates in the broadcast channel
         let (broadcast_tx, _) = broadcast::channel(256);
         Self {

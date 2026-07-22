@@ -13,11 +13,7 @@ use pulse_core::proto::ProbeResult;
 /// Measure TCP handshake latency to a host:port.
 ///
 /// Returns a `ProbeResult` with the round-trip time or an error.
-pub async fn tcp_probe(
-    host: &str,
-    port: u16,
-    timeout_ms: u32,
-) -> ProbeResult {
+pub async fn tcp_probe(host: &str, port: u16, timeout_ms: u32) -> ProbeResult {
     let target = format!("{host}:{port}");
     let timeout = Duration::from_millis(timeout_ms as u64);
 
@@ -74,9 +70,7 @@ async fn tcp_probe_inner(target: &str, timeout: Duration) -> Result<u64, ProbeEr
 }
 
 /// Probe multiple TCP targets concurrently.
-pub async fn probe_tcp_targets(
-    targets: &[(String, u16, u32)],
-) -> Vec<ProbeResult> {
+pub async fn probe_tcp_targets(targets: &[(String, u16, u32)]) -> Vec<ProbeResult> {
     let mut handles = Vec::with_capacity(targets.len());
 
     for (host, port, timeout_ms) in targets {

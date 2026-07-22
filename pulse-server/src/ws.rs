@@ -18,6 +18,7 @@ pub struct WsQuery {
 
 /// `GET /ws` — Upgrade to WebSocket for real-time telemetry updates.
 pub async fn ws_handler(
+    _claims: crate::api::Claims,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
     Query(params): Query<WsQuery>,
@@ -25,8 +26,17 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state, params.node_id))
 }
 
+struct WsGuard;
+impl Drop for WsGuard {
+    fn drop(&mut self) {
+        crate::metrics::WS_CONNECTIONS.dec();
+    }
+}
+
 /// Process a single WebSocket connection.
 async fn handle_socket(socket: WebSocket, state: AppState, filter_node_id: Option<String>) {
+    crate::metrics::WS_CONNECTIONS.inc();
+    let _guard = WsGuard;
     let (mut sender, mut receiver) = socket.split();
 
     // Subscribe to the broadcast channel

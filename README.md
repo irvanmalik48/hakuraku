@@ -115,6 +115,24 @@ cp .env.example .env
 docker compose up -d
 ```
 
+### Docker Swarm Stack
+
+To deploy Hakuraku to a Docker Swarm cluster with replicated servers and global agents running on every node:
+
+```bash
+# Deploy stack
+docker stack deploy -c docker-compose.swarm.yml hakuraku
+```
+
+### Kubernetes (k8s) Manifests
+
+To deploy the entire monitoring workspace (Postgres, VictoriaMetrics, server deployment, and agent DaemonSet) to a Kubernetes cluster:
+
+```bash
+# Apply configurations
+kubectl apply -f k8s/
+```
+
 ### Manual Compilation
 
 To compile the binaries directly on a host machine, execute:
@@ -207,3 +225,12 @@ A database benchmarking utility is included to validate PostgreSQL telemetry per
 # Run database insertion & query benchmark
 cargo run --release --bin bench
 ```
+
+### CI/CD Pipeline
+
+The project uses GitHub Actions for continuous integration and delivery. The workflow resides in `.github/workflows/test.yml` and performs:
+1. **Compilation checks** & **Code Formatting** (`cargo fmt --check`).
+2. **Clippy warning checks** (`cargo clippy -- -D warnings`).
+3. **Unit & E2E Integration tests** against a live PostgreSQL 18 service container.
+4. **Docker Image build verification** for both agent and server.
+5. **Release Binaries Compilation** & upload of downloadable GitHub artifacts (`pulse-server-binary`, `pulse-agent-binary`).

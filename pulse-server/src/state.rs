@@ -27,7 +27,7 @@ pub struct NodeInfo {
     pub latest_stats: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeStatus {
     Online,

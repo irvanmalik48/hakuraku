@@ -1,0 +1,36 @@
+[package]
+name = "pulse-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ultra-lightweight system monitoring daemon for 伯楽 (Hakuraku)."
+
+[dependencies]
+pulse-core = { path = "../pulse-core" }
+
+# Async runtime — minimal feature set for small binary
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "net",
+    "time",
+    "fs",
+    "signal",
+    "macros",
+    "sync",
+] }
+
+tonic = { workspace = true }
+prost = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Streaming
+tokio-stream = "0.1"
+
+# Env config
+serde = { workspace = true }

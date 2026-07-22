@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: 伯楽 (Hakuraku) Monitoring REST API
   description: Central ingestion and dashboard REST API for the 伯楽 (Hakuraku) system.
-  version: 0.1.0
+  version: 1.0.0
 servers:
   - url: /api/v1
     description: Base path for version 1 API endpoints

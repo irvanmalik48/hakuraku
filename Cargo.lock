@@ -1453,7 +1453,7 @@ dependencies = [
 
 [[package]]
 name = "pulse-agent"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "prost",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "pulse-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "hex",
  "hmac 0.12.1",
@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "pulse-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "axum",

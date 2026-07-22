@@ -22,6 +22,17 @@ pub trait NodeRepository {
         stats_json: &str,
     ) -> Result<()>;
 
+    /// Insert a probe result.
+    async fn insert_probe_result(
+        &self,
+        node_id: &str,
+        target: &str,
+        success: bool,
+        latency_us: i64,
+        error_message: &str,
+        timestamp: i64,
+    ) -> Result<()>;
+
     /// Retrieve all nodes.
     async fn get_all_nodes(&self) -> Result<Vec<NodeInfo>>;
 
@@ -71,12 +82,13 @@ impl PostgresNodeRepository {
 
 impl NodeRepository for PostgresNodeRepository {
     async fn upsert_node(&self, node_id: &str, hostname: &str, status: &str) -> Result<()> {
+        let start = std::time::Instant::now();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
 
-        sqlx::query(
+        let res = sqlx::query(
             r#"
             INSERT INTO nodes (id, hostname, last_seen, status)
             VALUES ($1, $2, $3, $4)
@@ -91,8 +103,17 @@ impl NodeRepository for PostgresNodeRepository {
         .bind(now_ms)
         .bind(status)
         .execute(&self.pool)
-        .await?;
+        .await;
 
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["upsert_node"])
+            .observe(start.elapsed().as_secs_f64());
+        if res.is_err() {
+            crate::metrics::DB_ERRORS
+                .with_label_values(&["upsert_node"])
+                .inc();
+        }
+        res?;
         Ok(())
     }
 
@@ -102,9 +123,10 @@ impl NodeRepository for PostgresNodeRepository {
         timestamp_ms: i64,
         stats_json: &str,
     ) -> Result<()> {
+        let start = std::time::Instant::now();
         let stats_val: serde_json::Value = serde_json::from_str(stats_json).unwrap_or_default();
 
-        sqlx::query(
+        let res = sqlx::query(
             r#"
             INSERT INTO snapshots (node_id, timestamp, stats_json)
             VALUES ($1, $2, $3)
@@ -114,28 +136,107 @@ impl NodeRepository for PostgresNodeRepository {
         .bind(timestamp_ms)
         .bind(stats_val)
         .execute(&self.pool)
-        .await?;
+        .await;
 
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["insert_snapshot"])
+            .observe(start.elapsed().as_secs_f64());
+        if res.is_err() {
+            crate::metrics::DB_ERRORS
+                .with_label_values(&["insert_snapshot"])
+                .inc();
+        }
+        res?;
+        Ok(())
+    }
+
+    async fn insert_probe_result(
+        &self,
+        node_id: &str,
+        target: &str,
+        success: bool,
+        latency_us: i64,
+        error_message: &str,
+        timestamp: i64,
+    ) -> Result<()> {
+        let start = std::time::Instant::now();
+        let res = sqlx::query(
+            r#"
+            INSERT INTO probe_results (node_id, target, success, latency_us, error_message, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(node_id)
+        .bind(target)
+        .bind(success)
+        .bind(latency_us)
+        .bind(error_message)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await;
+
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["insert_probe_result"])
+            .observe(start.elapsed().as_secs_f64());
+        if res.is_err() {
+            crate::metrics::DB_ERRORS
+                .with_label_values(&["insert_probe_result"])
+                .inc();
+        }
+        res?;
         Ok(())
     }
 
     async fn get_all_nodes(&self) -> Result<Vec<NodeInfo>> {
-        let rows =
-            sqlx::query_as::<_, NodeRow>("SELECT id, hostname, last_seen, status FROM nodes")
-                .fetch_all(&self.pool)
-                .await?;
+        let start = std::time::Instant::now();
+        let res = sqlx::query_as::<_, NodeRow>(
+            r#"
+            SELECT DISTINCT ON (n.id) n.id, n.hostname, n.last_seen, n.status, s.stats_json
+            FROM nodes n
+            LEFT JOIN snapshots s ON s.node_id = n.id
+            ORDER BY n.id, s.timestamp DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await;
 
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["get_all_nodes"])
+            .observe(start.elapsed().as_secs_f64());
+        if res.is_err() {
+            crate::metrics::DB_ERRORS
+                .with_label_values(&["get_all_nodes"])
+                .inc();
+        }
+        let rows = res?;
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
     async fn get_node(&self, node_id: &str) -> Result<Option<NodeInfo>> {
-        let row = sqlx::query_as::<_, NodeRow>(
-            "SELECT id, hostname, last_seen, status FROM nodes WHERE id = $1",
+        let start = std::time::Instant::now();
+        let res = sqlx::query_as::<_, NodeRow>(
+            r#"
+            SELECT n.id, n.hostname, n.last_seen, n.status, s.stats_json
+            FROM nodes n
+            LEFT JOIN snapshots s ON s.node_id = n.id
+            WHERE n.id = $1
+            ORDER BY s.timestamp DESC
+            LIMIT 1
+            "#,
         )
         .bind(node_id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await;
 
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["get_node"])
+            .observe(start.elapsed().as_secs_f64());
+        if res.is_err() {
+            crate::metrics::DB_ERRORS
+                .with_label_values(&["get_node"])
+                .inc();
+        }
+        let row = res?;
         Ok(row.map(|r| r.into()))
     }
 
@@ -146,7 +247,8 @@ impl NodeRepository for PostgresNodeRepository {
         to_ms: i64,
         limit: i64,
     ) -> Result<Vec<SnapshotRecord>> {
-        let rows = sqlx::query_as::<_, SnapshotRow>(
+        let start = std::time::Instant::now();
+        let res = sqlx::query_as::<_, SnapshotRow>(
             r#"
             SELECT node_id, timestamp, stats_json
             FROM snapshots
@@ -160,8 +262,17 @@ impl NodeRepository for PostgresNodeRepository {
         .bind(to_ms)
         .bind(limit)
         .fetch_all(&self.pool)
-        .await?;
+        .await;
 
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["get_snapshots"])
+            .observe(start.elapsed().as_secs_f64());
+        if res.is_err() {
+            crate::metrics::DB_ERRORS
+                .with_label_values(&["get_snapshots"])
+                .inc();
+        }
+        let rows = res?;
         let records = rows
             .into_iter()
             .map(|r| SnapshotRecord {
@@ -175,12 +286,43 @@ impl NodeRepository for PostgresNodeRepository {
     }
 
     async fn cleanup_old_snapshots(&self, before_ms: i64) -> Result<u64> {
-        let result = sqlx::query("DELETE FROM snapshots WHERE created_at < $1")
+        let start = std::time::Instant::now();
+        let mut total_deleted = 0;
+
+        let res_snaps = sqlx::query("DELETE FROM snapshots WHERE timestamp < $1")
             .bind(before_ms)
             .execute(&self.pool)
-            .await?;
+            .await;
 
-        Ok(result.rows_affected())
+        match &res_snaps {
+            Ok(result) => total_deleted += result.rows_affected(),
+            Err(_) => {
+                crate::metrics::DB_ERRORS
+                    .with_label_values(&["cleanup_old_snapshots"])
+                    .inc();
+            }
+        }
+        let _result_snaps = res_snaps?;
+
+        let res_probes = sqlx::query("DELETE FROM probe_results WHERE timestamp < $1")
+            .bind(before_ms)
+            .execute(&self.pool)
+            .await;
+
+        match &res_probes {
+            Ok(result) => total_deleted += result.rows_affected(),
+            Err(_) => {
+                crate::metrics::DB_ERRORS
+                    .with_label_values(&["cleanup_old_snapshots"])
+                    .inc();
+            }
+        }
+        let _result_probes = res_probes?;
+
+        crate::metrics::DB_LATENCY
+            .with_label_values(&["cleanup_old_snapshots"])
+            .observe(start.elapsed().as_secs_f64());
+        Ok(total_deleted)
     }
 }
 
@@ -192,6 +334,7 @@ struct NodeRow {
     hostname: String,
     last_seen: i64,
     status: String,
+    stats_json: Option<serde_json::Value>,
 }
 
 impl From<NodeRow> for NodeInfo {
@@ -206,7 +349,7 @@ impl From<NodeRow> for NodeInfo {
             hostname: row.hostname,
             last_seen_ms: row.last_seen,
             status,
-            latest_stats: None,
+            latest_stats: row.stats_json,
         }
     }
 }

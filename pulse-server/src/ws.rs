@@ -1,13 +1,35 @@
-//! WebSocket fan-out handler for real-time dashboard updates.
-
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
-use crate::state::AppState;
+use crate::state::{AppState, NodeStatus};
+
+/// Typed WebSocket messages with internally-tagged discriminant for schema safety.
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum WsMessage {
+    /// Initial state snapshot sent on connect.
+    Init { nodes: Vec<NodeSnapshot> },
+    /// Real-time update for a single node.
+    Update {
+        node_id: String,
+        timestamp_ms: i64,
+        stats: serde_json::Value,
+    },
+}
+
+/// Per-node snapshot included in the `Init` message.
+#[derive(Serialize)]
+struct NodeSnapshot {
+    node_id: String,
+    hostname: String,
+    last_seen_ms: i64,
+    status: NodeStatus,
+    stats: Option<serde_json::Value>,
+}
 
 /// Optional query parameters for WebSocket filtering.
 #[derive(Deserialize)]
@@ -48,27 +70,23 @@ async fn handle_socket(socket: WebSocket, state: AppState, filter_node_id: Optio
     );
 
     // Send initial state: current snapshot of all nodes
-    let initial_state: Vec<serde_json::Value> = state
+    let nodes: Vec<NodeSnapshot> = state
         .nodes
         .iter()
         .filter(|entry| filter_node_id.as_ref().is_none_or(|f| f == entry.key()))
         .map(|entry| {
             let node = entry.value();
-            serde_json::json!({
-                "type": "snapshot",
-                "node_id": node.node_id,
-                "hostname": node.hostname,
-                "last_seen_ms": node.last_seen_ms,
-                "status": node.status,
-                "stats": node.latest_stats,
-            })
+            NodeSnapshot {
+                node_id: node.node_id.clone(),
+                hostname: node.hostname.clone(),
+                last_seen_ms: node.last_seen_ms,
+                status: node.status.clone(),
+                stats: node.latest_stats.clone(),
+            }
         })
         .collect();
 
-    let init_msg = serde_json::json!({
-        "type": "init",
-        "nodes": initial_state,
-    });
+    let init_msg = WsMessage::Init { nodes };
 
     if let Ok(json) = serde_json::to_string(&init_msg)
         && sender.send(Message::Text(json.into())).await.is_err()
@@ -89,12 +107,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, filter_node_id: Optio
                         continue;
                     }
 
-                    let msg = serde_json::json!({
-                        "type": "update",
-                        "node_id": update.node_id,
-                        "timestamp_ms": update.timestamp_ms,
-                        "stats": update.stats,
-                    });
+                    let msg = WsMessage::Update {
+                        node_id: update.node_id,
+                        timestamp_ms: update.timestamp_ms,
+                        stats: update.stats,
+                    };
 
                     match serde_json::to_string(&msg) {
                         Ok(json) => {

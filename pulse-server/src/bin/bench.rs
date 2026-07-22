@@ -1,4 +1,4 @@
-//! Hakuraku database and API benchmarking utility.
+#![allow(dead_code)]
 
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;

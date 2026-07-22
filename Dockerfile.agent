@@ -1,0 +1,59 @@
+# ── 伯楽 (Hakuraku) Agent Dockerfile ─────────────────────────────────────────
+# Multi-stage build producing a minimal scratch-based image (< 15MB).
+#
+# Build:  docker build -f Dockerfile.agent -t pulse-agent .
+# Run:    docker run --read-only \
+#           -v /proc:/host/proc:ro \
+#           -v /sys:/host/sys:ro \
+#           -e PULSE_AUTH_SECRET=... \
+#           pulse-agent
+
+# ── Stage 1: Build ──────────────────────────────────────────────────────────
+
+FROM rust:1-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache musl-dev pkgconfig protobuf-dev
+
+WORKDIR /build
+
+# Cache workspace dependency resolution
+COPY Cargo.toml Cargo.lock* ./
+COPY pulse-core/Cargo.toml pulse-core/Cargo.toml
+COPY pulse-agent/Cargo.toml pulse-agent/Cargo.toml
+COPY pulse-server/Cargo.toml pulse-server/Cargo.toml
+
+# Create dummy source files
+RUN mkdir -p pulse-core/src pulse-agent/src pulse-server/src \
+    && echo "fn main() {}" > pulse-agent/src/main.rs \
+    && echo "fn main() {}" > pulse-server/src/main.rs \
+    && echo "" > pulse-core/src/lib.rs
+
+# Copy proto files needed for pulse-core build
+COPY pulse-core/proto pulse-core/proto
+COPY pulse-core/build.rs pulse-core/build.rs
+
+# Build dependencies only (cached layer)
+RUN cargo build --release -p pulse-agent 2>/dev/null || true
+
+# Copy actual source code
+COPY pulse-core/src pulse-core/src
+COPY pulse-agent/src pulse-agent/src
+
+# Touch source files to invalidate build cache
+RUN touch pulse-core/src/lib.rs pulse-agent/src/main.rs
+
+# Build the actual agent binary
+RUN cargo build --release -p pulse-agent
+
+# ── Stage 2: Runtime (scratch — minimal attack surface) ─────────────────────
+
+FROM scratch
+
+# Copy the static binary
+COPY --from=builder /build/target/release/pulse-agent /pulse-agent
+
+# Run as non-root (numeric UID since scratch has no /etc/passwd)
+USER 1000
+
+ENTRYPOINT ["/pulse-agent"]

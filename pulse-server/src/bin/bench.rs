@@ -8,6 +8,8 @@ use std::time::Instant;
 mod db;
 #[path = "../state.rs"]
 mod state;
+#[path = "../metrics.rs"]
+mod metrics;
 
 use db::{NodeRepository, PostgresNodeRepository};
 

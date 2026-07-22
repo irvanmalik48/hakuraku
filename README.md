@@ -3,7 +3,7 @@
 伯楽 (Hakuraku) is a high-throughput system monitoring and telemetry collection suite
 written in Rust. It consists of a lightweight daemon (agent) that collects host
 metrics and a central server that ingests telemetry via gRPC, stores it in an
-optimized SQLite database, and exposes data through a REST API and a real-time
+optimized PostgreSQL 18 database, and exposes data through a REST API and a real-time
 WebSocket broadcast channel.
 
 The system uses a size-optimized workspace design, compiles static binaries with
@@ -32,7 +32,7 @@ graph LR
 
     subgraph Core ["Hakuraku Central Server"]
         SV["Hakuraku Server"]
-        DB[("SQLite WAL DB")]
+        DB[("PostgreSQL 18 DB")]
     end
 
     subgraph Daemon ["Hakuraku Daemon"]
@@ -61,7 +61,7 @@ graph LR
     connection).
   - Configured keepalives and keepalive timeouts for HTTP/2 & gRPC.
   - Scratch-based agent container and non-root Alpine server container.
-- **Data Retention**: Background worker that purges SQLite snapshots older than
+- **Data Retention**: Background worker that purges PostgreSQL snapshots older than
   7 days.
 - **Probing**: Concurrent TCP handshake latency measurements.
 
@@ -85,7 +85,7 @@ PULSE_SERVER_ADDR=http://pulse-server:50051
 PULSE_INTERVAL_MS=1000
 
 # Server configuration
-DATABASE_URL=sqlite:///data/pulse.db
+DATABASE_URL=postgres://pulse:password@localhost:5432/pulse
 PULSE_GRPC_PORT=50051
 PULSE_HTTP_PORT=3000
 ```

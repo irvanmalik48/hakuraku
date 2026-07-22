@@ -12,8 +12,7 @@ use crate::state::{NodeInfo, NodeStatus};
 #[allow(async_fn_in_trait)]
 pub trait NodeRepository {
     /// Upsert a node record (update last_seen and status).
-    async fn upsert_node(&self, node_id: &str, hostname: &str, status: &str)
-        -> Result<()>;
+    async fn upsert_node(&self, node_id: &str, hostname: &str, status: &str) -> Result<()>;
 
     /// Insert a telemetry snapshot.
     async fn insert_snapshot(
@@ -64,21 +63,14 @@ impl PostgresNodeRepository {
     /// Run embedded migrations.
     pub async fn migrate(&self) -> Result<()> {
         let migration_sql = include_str!("../migrations/001_init.sql");
-        sqlx::raw_sql(migration_sql)
-            .execute(&self.pool)
-            .await?;
+        sqlx::raw_sql(migration_sql).execute(&self.pool).await?;
         tracing::info!("database migrations applied");
         Ok(())
     }
 }
 
 impl NodeRepository for PostgresNodeRepository {
-    async fn upsert_node(
-        &self,
-        node_id: &str,
-        hostname: &str,
-        status: &str,
-    ) -> Result<()> {
+    async fn upsert_node(&self, node_id: &str, hostname: &str, status: &str) -> Result<()> {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -128,9 +120,10 @@ impl NodeRepository for PostgresNodeRepository {
     }
 
     async fn get_all_nodes(&self) -> Result<Vec<NodeInfo>> {
-        let rows = sqlx::query_as::<_, NodeRow>("SELECT id, hostname, last_seen, status FROM nodes")
-            .fetch_all(&self.pool)
-            .await?;
+        let rows =
+            sqlx::query_as::<_, NodeRow>("SELECT id, hostname, last_seen, status FROM nodes")
+                .fetch_all(&self.pool)
+                .await?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }
@@ -182,11 +175,10 @@ impl NodeRepository for PostgresNodeRepository {
     }
 
     async fn cleanup_old_snapshots(&self, before_ms: i64) -> Result<u64> {
-        let result =
-            sqlx::query("DELETE FROM snapshots WHERE created_at < $1")
-                .bind(before_ms)
-                .execute(&self.pool)
-                .await?;
+        let result = sqlx::query("DELETE FROM snapshots WHERE created_at < $1")
+            .bind(before_ms)
+            .execute(&self.pool)
+            .await?;
 
         Ok(result.rows_affected())
     }
@@ -232,9 +224,8 @@ mod tests {
     use sqlx::postgres::PgPoolOptions;
 
     async fn get_test_pool() -> Option<PgPool> {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://pulse:password@localhost:54321/pulse".to_string()
-        });
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://pulse:password@localhost:54321/pulse".to_string());
         PgPoolOptions::new()
             .max_connections(2)
             .connect(&database_url)
@@ -255,10 +246,20 @@ mod tests {
         let repo = PostgresNodeRepository::new(pool);
         repo.migrate().await.unwrap();
 
-        sqlx::query("DELETE FROM snapshots WHERE node_id = $1").bind("test-node-1").execute(&repo.pool).await.unwrap();
-        sqlx::query("DELETE FROM nodes WHERE id = $1").bind("test-node-1").execute(&repo.pool).await.unwrap();
+        sqlx::query("DELETE FROM snapshots WHERE node_id = $1")
+            .bind("test-node-1")
+            .execute(&repo.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM nodes WHERE id = $1")
+            .bind("test-node-1")
+            .execute(&repo.pool)
+            .await
+            .unwrap();
 
-        repo.upsert_node("test-node-1", "test-host", "online").await.unwrap();
+        repo.upsert_node("test-node-1", "test-host", "online")
+            .await
+            .unwrap();
 
         let node = repo.get_node("test-node-1").await.unwrap().unwrap();
         assert_eq!(node.node_id, "test-node-1");
@@ -279,15 +280,30 @@ mod tests {
         let repo = PostgresNodeRepository::new(pool);
         repo.migrate().await.unwrap();
 
-        sqlx::query("DELETE FROM snapshots WHERE node_id = $1").bind("test-node-2").execute(&repo.pool).await.unwrap();
-        sqlx::query("DELETE FROM nodes WHERE id = $1").bind("test-node-2").execute(&repo.pool).await.unwrap();
+        sqlx::query("DELETE FROM snapshots WHERE node_id = $1")
+            .bind("test-node-2")
+            .execute(&repo.pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM nodes WHERE id = $1")
+            .bind("test-node-2")
+            .execute(&repo.pool)
+            .await
+            .unwrap();
 
-        repo.upsert_node("test-node-2", "test-host", "online").await.unwrap();
+        repo.upsert_node("test-node-2", "test-host", "online")
+            .await
+            .unwrap();
 
         let stats_json = r#"{"cpu_percent": 12.5}"#;
-        repo.insert_snapshot("test-node-2", 1721634839000, stats_json).await.unwrap();
+        repo.insert_snapshot("test-node-2", 1721634839000, stats_json)
+            .await
+            .unwrap();
 
-        let snapshots = repo.get_snapshots("test-node-2", 1721634830000, 1721634845000, 10).await.unwrap();
+        let snapshots = repo
+            .get_snapshots("test-node-2", 1721634830000, 1721634845000, 10)
+            .await
+            .unwrap();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].node_id, "test-node-2");
         assert_eq!(snapshots[0].timestamp, 1721634839000);

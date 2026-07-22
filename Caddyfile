@@ -1,0 +1,45 @@
+# ── 伯楽 (Hakuraku) Monitoring — Caddyfile ───────────────────────────────────
+# Reverse proxy configuration for gRPC, REST, and WebSocket traffic.
+#
+# Features:
+#   • Automatic HTTPS via Let's Encrypt / ZeroSSL
+#   • HTTP/3 (QUIC) — enabled by default in Caddy 2.7+
+#   • gRPC proxying via h2c (cleartext HTTP/2) to pulse-server
+#   • WebSocket upgrade handling (automatic in Caddy)
+#
+# Replace {$PULSE_DOMAIN} with your actual domain, or set the env var.
+# For local development, use `localhost` or `:443` instead.
+
+{$PULSE_DOMAIN:localhost} {
+	# ── gRPC traffic (agent → server) ────────────────────────────────────
+	# gRPC service paths follow the /package.ServiceName/ convention.
+	handle /pulse.MonitoringService/* {
+		reverse_proxy h2c://pulse-server:50051
+	}
+
+	# ── WebSocket endpoint ───────────────────────────────────────────────
+	handle /ws {
+		reverse_proxy pulse-server:3000
+	}
+
+	# ── REST API ─────────────────────────────────────────────────────────
+	handle /api/* {
+		reverse_proxy pulse-server:3000
+	}
+
+	# ── Health check ─────────────────────────────────────────────────────
+	handle /health {
+		reverse_proxy pulse-server:3000
+	}
+
+	# ── Default: 404 ─────────────────────────────────────────────────────
+	handle {
+		respond "伯楽 (Hakuraku) Monitoring Server" 200
+	}
+
+	# ── Logging ──────────────────────────────────────────────────────────
+	log {
+		output stdout
+		format json
+	}
+}

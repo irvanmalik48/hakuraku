@@ -27,8 +27,10 @@ mod tests {
         // 2. Connect to database and clear test node data (skip if offline/unreachable)
         let pool = match tokio::time::timeout(
             Duration::from_millis(500),
-            sqlx::PgPool::connect(&database_url)
-        ).await {
+            sqlx::PgPool::connect(&database_url),
+        )
+        .await
+        {
             Ok(Ok(p)) => p,
             _ => {
                 eprintln!("skipping E2E integrity test: database unreachable");

@@ -45,6 +45,24 @@ impl std::fmt::Display for NodeStatus {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum IngestionItem {
+    Stats {
+        node_id: String,
+        timestamp_ms: i64,
+        stats_str: String,
+        stats_json: serde_json::Value,
+    },
+    ProbeResult {
+        node_id: String,
+        target: String,
+        success: bool,
+        latency_us: i64,
+        error_message: String,
+        timestamp: i64,
+    },
+}
+
 /// Shared application state accessible from both gRPC and Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
@@ -54,16 +72,19 @@ pub struct AppState {
     pub broadcast_tx: broadcast::Sender<NodeUpdate>,
     /// In-memory node registry for fast lookups.
     pub nodes: Arc<DashMap<NodeId, NodeInfo>>,
+    /// Bounded ingestion queue sender for database operations.
+    pub ingestion_tx: tokio::sync::mpsc::Sender<IngestionItem>,
 }
 
 impl AppState {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: PgPool, ingestion_tx: tokio::sync::mpsc::Sender<IngestionItem>) -> Self {
         // Buffer up to 256 updates in the broadcast channel
         let (broadcast_tx, _) = broadcast::channel(256);
         Self {
             db,
             broadcast_tx,
             nodes: Arc::new(DashMap::new()),
+            ingestion_tx,
         }
     }
 }

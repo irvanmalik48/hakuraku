@@ -225,7 +225,7 @@ mod tests {
 
     async fn get_test_pool() -> Option<PgPool> {
         let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://pulse:password@localhost:54321/pulse".to_string());
+            .unwrap_or_else(|_| "postgres://pulse:password@localhost:5432/pulse".to_string());
         PgPoolOptions::new()
             .max_connections(2)
             .connect(&database_url)

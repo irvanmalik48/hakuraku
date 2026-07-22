@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     println!("======================================");
 
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://pulse:password@localhost:54321/pulse".to_string());
+        .unwrap_or_else(|_| "postgres://pulse:password@localhost:5432/pulse".to_string());
 
     println!("Connecting to database...");
     let pool = PgPoolOptions::new()

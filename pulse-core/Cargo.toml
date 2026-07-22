@@ -16,6 +16,7 @@ hex = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+getrandom = "0.4.3"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

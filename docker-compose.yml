@@ -1,0 +1,64 @@
+# 伯楽 (Hakuraku) Monitoring — Docker Compose
+# Multi-service deployment: Server and optional Agent.
+# Relies on an external Caddy reverse proxy on the 'caddy_mesh' network.
+
+services:
+  # Central telemetry ingestion and dashboard API server
+  pulse-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: pulse-server
+    restart: unless-stopped
+    environment:
+      - PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}
+      - DATABASE_URL=sqlite:///data/pulse.db
+      - PULSE_GRPC_PORT=50051
+      - PULSE_HTTP_PORT=3000
+      - RUST_LOG=pulse_server=info
+    volumes:
+      - pulse_data:/data
+    networks:
+      - caddy_mesh
+    expose:
+      - "50051"
+      - "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Optional local monitoring agent (run host/standalone agent in production)
+  pulse-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: pulse-agent
+    restart: unless-stopped
+    environment:
+      - PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}
+      - PULSE_SERVER_ADDR=http://pulse-server:50051
+      - PULSE_NODE_ID=${PULSE_NODE_ID:-docker-agent-01}
+      - PULSE_INTERVAL_MS=${PULSE_INTERVAL_MS:-1000}
+      - RUST_LOG=pulse_agent=info
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    networks:
+      - caddy_mesh
+    depends_on:
+      pulse-server:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  caddy_mesh:
+    external: true
+
+volumes:
+  pulse_data:
+    driver: local

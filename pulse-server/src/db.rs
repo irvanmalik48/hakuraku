@@ -376,7 +376,7 @@ mod tests {
             std::time::Duration::from_millis(500),
             PgPoolOptions::new()
                 .max_connections(2)
-                .connect(&database_url)
+                .connect(&database_url),
         )
         .await
         .ok()

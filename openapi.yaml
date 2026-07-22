@@ -124,7 +124,61 @@ paths:
                   version:
                     type: string
                     example: "0.1.0"
+  /healthz:
+    get:
+      summary: Liveness check
+      description: Returns liveness status of the server.
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: Server is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+  /readyz:
+    get:
+      summary: Readiness check
+      description: Checks database connectivity status.
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: Server is ready
+        '503':
+          description: Database connectivity offline
+  /metrics:
+    get:
+      summary: Prometheus Metrics
+      description: Scrapes Prometheus-compatible metric instrumentation data. Requires authentication.
+      servers:
+        - url: /
+      security:
+        - BearerAuth: []
+        - TokenHeader: []
+      responses:
+        '200':
+          description: Text metric families stream
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: Unauthorized
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+    TokenHeader:
+      type: apiKey
+      in: header
+      name: x-pulse-auth-token
   schemas:
     NodeInfo:
       type: object

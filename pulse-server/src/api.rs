@@ -344,6 +344,9 @@ mod tests {
     use tower::ServiceExt;
 
     fn get_mock_state() -> AppState {
+        unsafe {
+            std::env::set_var("PULSE_AUTH_SECRET", "testsecret");
+        }
         let db = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let (tx, _) = tokio::sync::mpsc::channel(100);
         AppState::new(db, tx)
@@ -371,6 +374,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/nodes")
+                    .header("Authorization", "Bearer testsecret")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -410,6 +414,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/nodes/node-test-2")
+                    .header("Authorization", "Bearer testsecret")
                     .body(Body::empty())
                     .unwrap(),
             )

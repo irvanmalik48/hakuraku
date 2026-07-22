@@ -5,7 +5,6 @@ mod tests {
     use crate::grpc::MonitoringServiceImpl;
     use crate::state::AppState;
     use axum::{Router, routing::get};
-    use pulse_core::auth::sign_request;
     use pulse_core::proto::telemetry_message::Payload as ClientPayload;
     use pulse_core::proto::{NodeStats, TelemetryMessage};
     use std::time::Duration;
@@ -49,15 +48,15 @@ mod tests {
             .execute(&pool)
             .await;
 
-        // 3. Initialize Server state and Bounded Ingestion Queue
-        let (ingestion_tx, ingestion_rx) = tokio::sync::mpsc::channel(100);
-        let app_state = AppState::new(pool.clone(), ingestion_tx);
+        // 3. Initialize Server state and Bounded Ingestion Queue (single worker for test)
+        let (ingestion_tx, mut ingestion_rx) = tokio::sync::mpsc::channel(100);
+        let worker_txs = std::sync::Arc::new(vec![ingestion_tx]);
+        let app_state = AppState::new(pool.clone(), worker_txs);
 
         // Spawn ingestion workers (1 worker is enough for testing)
         let repo_worker = repo.clone();
-        let mut rx = ingestion_rx;
         let worker_handle = tokio::spawn(async move {
-            while let Some(item) = rx.recv().await {
+            while let Some(item) = ingestion_rx.recv().await {
                 if let crate::state::IngestionItem::Stats {
                     node_id,
                     timestamp_ms,
@@ -119,39 +118,34 @@ mod tests {
                 .unwrap();
         });
 
-        // 6. Connect Agent (gRPC Client)
+        // 6. Connect Agent (gRPC Client) — use inject_auth_headers for proper nonce generation
         let channel = tonic::transport::Channel::from_shared(format!("http://{}", grpc_addr))
             .unwrap()
             .connect()
             .await
             .unwrap();
 
-        let now_sec = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let node_id = "node-integrity-test";
-        let signature = sign_request(secret.as_bytes(), node_id, now_sec);
+        let node_id_str = "node-integrity-test".to_string();
+        let secret_for_client = secret.as_bytes().to_vec();
 
         let mut client =
             pulse_core::proto::monitoring_service_client::MonitoringServiceClient::with_interceptor(
                 channel,
-                move |mut req: Request<()>| {
-                    req.metadata_mut()
-                        .insert("x-pulse-node-id", node_id.parse().unwrap());
-                    req.metadata_mut()
-                        .insert("x-pulse-timestamp", now_sec.to_string().parse().unwrap());
-                    req.metadata_mut()
-                        .insert("x-pulse-signature", signature.parse().unwrap());
-                    Ok(req)
+                move |req: Request<()>| {
+                    pulse_core::auth::inject_auth_headers(&secret_for_client, &node_id_str, req)
                 },
             );
 
         // 7. Send Telemetry stats
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let test_node_id = "node-integrity-test";
         let stats_payload = TelemetryMessage {
             payload: Some(ClientPayload::Stats(NodeStats {
-                node_id: node_id.to_string(),
-                timestamp_ms: now_sec * 1000,
+                node_id: test_node_id.to_string(),
+                timestamp_ms: now_ms,
                 cpu_percent: 42.42,
                 mem_total: 1000,
                 mem_used: 500,
@@ -203,7 +197,7 @@ mod tests {
         let body: serde_json::Value = res_http.json().await.unwrap();
         assert_eq!(body["count"], 1);
         let first_node = &body["nodes"][0];
-        assert_eq!(first_node["node_id"], node_id);
+        assert_eq!(first_node["node_id"], test_node_id);
         assert_eq!(first_node["status"], "online");
         assert_eq!(first_node["latest_stats"]["cpu_percent"], 42.42);
 

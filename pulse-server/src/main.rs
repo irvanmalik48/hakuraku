@@ -18,7 +18,7 @@ use axum::error_handling::HandleErrorLayer;
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::routing::get;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Server as TonicServer;
 use tower::BoxError;
 use tower::timeout::TimeoutLayer;
@@ -30,7 +30,7 @@ use tracing::info;
 use pulse_core::MonitoringServiceServer;
 use pulse_core::auth::AuthInterceptor;
 
-use crate::db::{NodeRepository, SqliteNodeRepository};
+use crate::db::{NodeRepository, PostgresNodeRepository};
 use crate::grpc::MonitoringServiceImpl;
 use crate::state::AppState;
 
@@ -49,30 +49,20 @@ async fn main() -> Result<()> {
 
     // ── Database Setup ──────────────────────────────────────────────────────
 
-    let database_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://pulse.db".to_string());
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://pulse:password@localhost:5432/pulse".to_string());
 
-    // Strip the sqlite:// prefix to get the file path for SqliteConnectOptions
-    let db_path = database_url
-        .strip_prefix("sqlite://")
-        .unwrap_or(&database_url);
-
-    let connect_opts = SqliteConnectOptions::new()
-        .filename(db_path)
-        .journal_mode(SqliteJournalMode::Wal)
-        .busy_timeout(Duration::from_secs(5))
-        .create_if_missing(true);
-
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect_with(connect_opts)
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&database_url)
         .await
-        .context("failed to connect to SQLite database")?;
+        .context("failed to connect to PostgreSQL database")?;
 
-    info!(url = %database_url, "database connected (WAL mode)");
+    info!("database connected successfully");
 
     // Run migrations
-    let repo = SqliteNodeRepository::new(pool.clone());
+    let repo = PostgresNodeRepository::new(pool.clone());
     repo.migrate()
         .await
         .context("failed to run database migrations")?;

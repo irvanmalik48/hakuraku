@@ -4,8 +4,12 @@
 //! streams it to a `pulse-server` instance via gRPC bidirectional streaming.
 
 mod buffer;
+#[cfg(target_os = "linux")]
 mod collector;
 mod prober;
+
+#[cfg(not(target_os = "linux"))]
+compile_error!("pulse-agent currently only supports Linux (requires /proc and /sys)");
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -55,6 +59,19 @@ impl Config {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle --health-check flag for container HEALTHCHECK integration
+    if std::env::args().any(|arg| arg == "--health-check") {
+        let path = std::env::var("PROC_PATH").unwrap_or_else(|_| "/proc".to_string());
+        let stat = format!("{}/stat", path);
+        match std::fs::metadata(&stat) {
+            Ok(m) if m.is_file() => std::process::exit(0),
+            _ => {
+                eprintln!("health check failed: {} not readable", stat);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Initialize structured logging
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -154,6 +171,11 @@ async fn run_session(
 ) -> Result<()> {
     // Connect to server
     let channel = Channel::from_shared(config.server_addr.clone())?
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .tcp_keepalive(Some(Duration::from_secs(60)))
+        .http2_keep_alive_interval(Duration::from_secs(30))
+        .keep_alive_while_idle(true)
         .connect()
         .await
         .context("failed to connect to pulse-server")?;
@@ -376,12 +398,9 @@ impl ExponentialBackoff {
     }
 }
 
-/// Simple pseudo-random float [0.0, 1.0) using system time nanos.
-/// Avoids pulling in a full `rand` crate dependency for the agent binary.
+/// Simple pseudo-random float [0.0, 1.0) using OS entropy via `getrandom`.
 fn rand_simple() -> f64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    (nanos as f64) / (u32::MAX as f64)
+    let mut buf = [0u8; 8];
+    getrandom::fill(&mut buf).unwrap_or_default();
+    (u64::from_le_bytes(buf) as f64) / (u64::MAX as f64)
 }

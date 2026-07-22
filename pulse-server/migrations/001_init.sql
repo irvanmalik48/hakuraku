@@ -1,19 +1,18 @@
--- 伯楽 (Hakuraku) server initial schema
--- SQLite with WAL mode (configured at connection level, not here)
+-- 伯楽 (Hakuraku) server initial schema for PostgreSQL 18
 
 CREATE TABLE IF NOT EXISTS nodes (
-    id          TEXT PRIMARY KEY NOT NULL,
-    hostname    TEXT NOT NULL DEFAULT '',
-    last_seen   INTEGER NOT NULL DEFAULT 0,  -- Unix timestamp ms
-    status      TEXT NOT NULL DEFAULT 'unknown'  -- 'online', 'offline', 'unknown'
+    id          VARCHAR PRIMARY KEY NOT NULL,
+    hostname    VARCHAR NOT NULL DEFAULT '',
+    last_seen   BIGINT NOT NULL DEFAULT 0,  -- Unix timestamp ms
+    status      VARCHAR NOT NULL DEFAULT 'unknown'  -- 'online', 'offline', 'unknown'
 );
 
 CREATE TABLE IF NOT EXISTS snapshots (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    timestamp   INTEGER NOT NULL,  -- Unix timestamp ms
-    stats_json  TEXT NOT NULL,     -- Full NodeStats serialized as JSON
-    created_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now') * 1000)
+    id          BIGSERIAL PRIMARY KEY,
+    node_id     VARCHAR NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    timestamp   BIGINT NOT NULL,  -- Unix timestamp ms
+    stats_json  JSONB NOT NULL,    -- Full NodeStats serialized as JSON
+    created_at  BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000)::BIGINT
 );
 
 -- Index for time-range queries per node

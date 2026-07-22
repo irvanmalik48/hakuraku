@@ -14,17 +14,17 @@ use pulse_core::proto::server_command::Payload as ServerPayload;
 use pulse_core::proto::telemetry_message::Payload as ClientPayload;
 use pulse_core::proto::{HeartbeatAck, ServerCommand, TelemetryMessage};
 
-use crate::db::{NodeRepository, SqliteNodeRepository};
+use crate::db::{NodeRepository, PostgresNodeRepository};
 use crate::state::{AppState, NodeInfo, NodeStatus, NodeUpdate};
 
 /// gRPC implementation of the `MonitoringService`.
 pub struct MonitoringServiceImpl {
     state: AppState,
-    repo: SqliteNodeRepository,
+    repo: PostgresNodeRepository,
 }
 
 impl MonitoringServiceImpl {
-    pub fn new(state: AppState, repo: SqliteNodeRepository) -> Self {
+    pub fn new(state: AppState, repo: PostgresNodeRepository) -> Self {
         Self { state, repo }
     }
 }

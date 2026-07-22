@@ -72,19 +72,39 @@ pub struct AppState {
     pub broadcast_tx: broadcast::Sender<NodeUpdate>,
     /// In-memory node registry for fast lookups.
     pub nodes: Arc<DashMap<NodeId, NodeInfo>>,
-    /// Bounded ingestion queue sender for database operations.
-    pub ingestion_tx: tokio::sync::mpsc::Sender<IngestionItem>,
+    /// Sharded ingestion worker senders (partitioned by node_id hash).
+    pub worker_txs: Arc<Vec<tokio::sync::mpsc::Sender<IngestionItem>>>,
 }
 
 impl AppState {
-    pub fn new(db: PgPool, ingestion_tx: tokio::sync::mpsc::Sender<IngestionItem>) -> Self {
+    pub fn new(
+        db: PgPool,
+        worker_txs: Arc<Vec<tokio::sync::mpsc::Sender<IngestionItem>>>,
+    ) -> Self {
         // Buffer up to 256 updates in the broadcast channel
         let (broadcast_tx, _) = broadcast::channel(256);
         Self {
             db,
             broadcast_tx,
             nodes: Arc::new(DashMap::new()),
-            ingestion_tx,
+            worker_txs,
         }
+    }
+
+    /// Route an ingestion item to the appropriate sharded worker by node_id hash.
+    pub fn send_to_worker(&self, node_id: &str, item: IngestionItem) {
+        let shard = self.shard(node_id);
+        if self.worker_txs[shard].try_send(item).is_err() {
+            tracing::error!(node_id = %node_id, shard = shard, "ingestion queue full, dropping item");
+            crate::metrics::INGESTION_DROPS.inc();
+        }
+    }
+
+    /// Compute the worker shard index for a given node_id.
+    fn shard(&self, node_id: &str) -> usize {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        node_id.hash(&mut hasher);
+        (hasher.finish() as usize) % self.worker_txs.len()
     }
 }

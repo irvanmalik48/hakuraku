@@ -1,0 +1,72 @@
+# ── 伯楽 (Hakuraku) Server Dockerfile ──────────────────────────────────────────
+# Multi-stage build producing a minimal Alpine-based image (< 20MB).
+#
+# Build:  docker build -f Dockerfile.server -t pulse-server .
+# Run:    docker run -e PULSE_AUTH_SECRET=... pulse-server
+
+# ── Stage 1: Build ──────────────────────────────────────────────────────────
+
+FROM rust:1-alpine AS builder
+
+# Install build dependencies for musl static linking + protobuf compiler
+RUN apk add --no-cache musl-dev pkgconfig protobuf-dev
+
+WORKDIR /build
+
+# Cache workspace dependency resolution
+COPY Cargo.toml Cargo.lock* ./
+COPY pulse-core/Cargo.toml pulse-core/Cargo.toml
+COPY pulse-agent/Cargo.toml pulse-agent/Cargo.toml
+COPY pulse-server/Cargo.toml pulse-server/Cargo.toml
+
+# Create dummy source files for dependency caching
+RUN mkdir -p pulse-core/src pulse-agent/src pulse-server/src \
+    && echo "fn main() {}" > pulse-agent/src/main.rs \
+    && echo "fn main() {}" > pulse-server/src/main.rs \
+    && echo "" > pulse-core/src/lib.rs
+
+# Copy proto files needed for pulse-core build
+COPY pulse-core/proto pulse-core/proto
+COPY pulse-core/build.rs pulse-core/build.rs
+
+# Build dependencies only (cached layer)
+RUN cargo build --release -p pulse-server 2>/dev/null || true
+
+# Copy actual source code
+COPY pulse-core/src pulse-core/src
+COPY pulse-server/src pulse-server/src
+COPY pulse-server/migrations pulse-server/migrations
+
+# Touch source files to invalidate the build cache for our code only
+RUN touch pulse-core/src/lib.rs pulse-server/src/main.rs
+
+# Build the actual server binary
+RUN cargo build --release -p pulse-server
+
+# ── Stage 2: Runtime ────────────────────────────────────────────────────────
+
+FROM alpine:3.20
+
+# Install CA certificates for outbound HTTPS (if needed)
+RUN apk add --no-cache ca-certificates
+
+# Create non-root user
+RUN adduser -D -u 1000 pulse
+
+# Create data directory for SQLite
+RUN mkdir -p /data && chown pulse:pulse /data
+
+# Copy the static binary from builder
+COPY --from=builder /build/target/release/pulse-server /usr/local/bin/pulse-server
+
+USER pulse
+
+# Default environment
+ENV DATABASE_URL="sqlite:///data/pulse.db"
+ENV PULSE_GRPC_PORT="50051"
+ENV PULSE_HTTP_PORT="3000"
+ENV RUST_LOG="pulse_server=info"
+
+EXPOSE 50051 3000
+
+ENTRYPOINT ["/usr/local/bin/pulse-server"]

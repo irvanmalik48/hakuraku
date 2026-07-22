@@ -37,3 +37,6 @@ serde = { workspace = true }
 
 # Shutdown support
 tokio-util = { workspace = true }
+
+# Entropy for backoff jitter
+getrandom = "0.4.3"

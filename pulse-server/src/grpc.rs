@@ -14,18 +14,16 @@ use pulse_core::proto::server_command::Payload as ServerPayload;
 use pulse_core::proto::telemetry_message::Payload as ClientPayload;
 use pulse_core::proto::{HeartbeatAck, ServerCommand, TelemetryMessage};
 
-use crate::db::{NodeRepository, PostgresNodeRepository};
 use crate::state::{AppState, NodeInfo, NodeStatus, NodeUpdate};
 
 /// gRPC implementation of the `MonitoringService`.
 pub struct MonitoringServiceImpl {
     state: AppState,
-    repo: PostgresNodeRepository,
 }
 
 impl MonitoringServiceImpl {
-    pub fn new(state: AppState, repo: PostgresNodeRepository) -> Self {
-        Self { state, repo }
+    pub fn new(state: AppState) -> Self {
+        Self { state }
     }
 }
 
@@ -43,14 +41,22 @@ impl MonitoringService for MonitoringServiceImpl {
             .unwrap_or_else(|| "unknown".into());
         info!(remote = %remote_addr, "new agent stream connected");
 
+        let authenticated_node_id = match request.metadata().get("x-pulse-node-id") {
+            Some(val) => match val.to_str() {
+                Ok(s) => s.to_string(),
+                Err(_) => return Err(Status::unauthenticated("invalid x-pulse-node-id header")),
+            },
+            None => return Err(Status::unauthenticated("missing x-pulse-node-id header")),
+        };
+
         let mut inbound = request.into_inner();
         let state = self.state.clone();
-        let repo = self.repo.clone();
 
         // Channel for sending commands back to the agent
         let (cmd_tx, cmd_rx) = mpsc::channel::<Result<ServerCommand, Status>>(32);
 
         // Spawn a task to process incoming telemetry
+        let auth_node_id = authenticated_node_id.clone();
         tokio::spawn(async move {
             while let Some(msg_result) = inbound.next().await {
                 let msg = match msg_result {
@@ -67,7 +73,21 @@ impl MonitoringService for MonitoringServiceImpl {
 
                 match payload {
                     ClientPayload::Stats(stats) => {
-                        let node_id = stats.node_id.clone();
+                        if stats.node_id != auth_node_id {
+                            error!(
+                                auth_node = %auth_node_id,
+                                payload_node = %stats.node_id,
+                                "Node ID spoofing detected in stats payload! Closing stream."
+                            );
+                            crate::metrics::AUTH_FAILURES
+                                .with_label_values(&["grpc", "node_id_spoofing"])
+                                .inc();
+                            break;
+                        }
+
+                        crate::metrics::GRPC_MESSAGES
+                            .with_label_values(&[&auth_node_id, "stats"])
+                            .inc();
                         let timestamp_ms = stats.timestamp_ms;
 
                         // Serialize stats to JSON for storage and broadcast
@@ -83,50 +103,55 @@ impl MonitoringService for MonitoringServiceImpl {
 
                         // Update in-memory node registry
                         state.nodes.insert(
-                            node_id.clone(),
+                            auth_node_id.clone(),
                             NodeInfo {
-                                node_id: node_id.clone(),
-                                hostname: node_id.clone(), // Agent could send hostname in a registration message
+                                node_id: auth_node_id.clone(),
+                                hostname: auth_node_id.clone(),
                                 last_seen_ms: timestamp_ms,
                                 status: NodeStatus::Online,
                                 latest_stats: Some(stats_json.clone()),
                             },
                         );
 
-                        // Persist to database (fire-and-forget, don't block the stream)
-                        let repo_clone = repo.clone();
-                        let node_id_clone = node_id.clone();
-                        tokio::spawn(async move {
-                            if let Err(e) = repo_clone
-                                .upsert_node(&node_id_clone, &node_id_clone, "online")
-                                .await
-                            {
-                                error!(error = %e, "failed to upsert node");
-                            }
-                            if let Err(e) = repo_clone
-                                .insert_snapshot(&node_id_clone, timestamp_ms, &stats_str)
-                                .await
-                            {
-                                error!(error = %e, "failed to insert snapshot");
-                            }
-                        });
+                        // Queue to database bounded channel (backpressure drop if full)
+                        let item = crate::state::IngestionItem::Stats {
+                            node_id: auth_node_id.clone(),
+                            timestamp_ms,
+                            stats_str,
+                            stats_json: stats_json.clone(),
+                        };
+                        if state.ingestion_tx.try_send(item).is_err() {
+                            error!(node_id = %auth_node_id, "ingestion queue full, dropping stats snapshot");
+                            crate::metrics::INGESTION_DROPS.inc();
+                        }
 
                         // Broadcast to WebSocket subscribers
                         let _ = state.broadcast_tx.send(NodeUpdate {
-                            node_id,
+                            node_id: auth_node_id.clone(),
                             timestamp_ms,
                             stats: stats_json,
                         });
                     }
 
                     ClientPayload::Heartbeat(hb) => {
-                        tracing::debug!(
-                            node_id = %hb.node_id,
-                            "heartbeat received"
-                        );
+                        if hb.node_id != auth_node_id {
+                            error!(
+                                auth_node = %auth_node_id,
+                                payload_node = %hb.node_id,
+                                "Node ID spoofing detected in heartbeat payload! Closing stream."
+                            );
+                            crate::metrics::AUTH_FAILURES
+                                .with_label_values(&["grpc", "node_id_spoofing"])
+                                .inc();
+                            break;
+                        }
+
+                        crate::metrics::GRPC_MESSAGES
+                            .with_label_values(&[&auth_node_id, "heartbeat"])
+                            .inc();
 
                         // Update last_seen in registry
-                        if let Some(mut entry) = state.nodes.get_mut(&hb.node_id) {
+                        if let Some(mut entry) = state.nodes.get_mut(&auth_node_id) {
                             entry.last_seen_ms = hb.timestamp_ms;
                             entry.status = NodeStatus::Online;
                         }
@@ -147,13 +172,28 @@ impl MonitoringService for MonitoringServiceImpl {
                     }
 
                     ClientPayload::ProbeResult(probe) => {
-                        tracing::debug!(
-                            target = %probe.target,
-                            success = probe.success,
-                            latency_us = probe.latency_us,
-                            "probe result received"
-                        );
-                        // Probe results can be stored or broadcast as needed
+                        crate::metrics::GRPC_MESSAGES
+                            .with_label_values(&[&auth_node_id, "probe_result"])
+                            .inc();
+
+                        // Persist to database bounded channel
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64;
+
+                        let item = crate::state::IngestionItem::ProbeResult {
+                            node_id: auth_node_id.clone(),
+                            target: probe.target.clone(),
+                            success: probe.success,
+                            latency_us: probe.latency_us as i64,
+                            error_message: probe.error_message.clone(),
+                            timestamp: now_ms,
+                        };
+                        if state.ingestion_tx.try_send(item).is_err() {
+                            error!(node_id = %auth_node_id, "ingestion queue full, dropping probe result");
+                            crate::metrics::INGESTION_DROPS.inc();
+                        }
                     }
                 }
             }

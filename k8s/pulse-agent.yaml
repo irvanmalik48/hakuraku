@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: pulse-agent
+spec:
+  selector:
+    matchLabels:
+      app: pulse-agent
+  template:
+    metadata:
+      labels:
+        app: pulse-agent
+    spec:
+      hostNetwork: true
+      containers:
+        - name: pulse-agent
+          image: irvanmalik48/pulse-agent:1.0.0
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: PULSE_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pulse-secret
+                  key: PULSE_AUTH_SECRET
+            - name: PULSE_SERVER_ADDR
+              value: http://pulse-server:50051
+            - name: PULSE_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: PULSE_INTERVAL_MS
+              value: "1000"
+            - name: RUST_LOG
+              value: pulse_agent=info
+          volumeMounts:
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-sys
+              mountPath: /host/sys
+              readOnly: true
+          resources:
+            limits:
+              cpu: "200m"
+              memory: 128Mi
+            requests:
+              cpu: "50m"
+              memory: 32Mi
+      volumes:
+        - name: host-proc
+          hostPath:
+            path: /proc
+        - name: host-sys
+          hostPath:
+            path: /sys

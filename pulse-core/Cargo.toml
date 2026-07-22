@@ -1,0 +1,21 @@
+[package]
+name = "pulse-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared types, protobuf definitions, and cryptographic auth for 伯楽 (Hakuraku)."
+
+[dependencies]
+prost = { workspace = true }
+prost-types = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = "0.14"
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = "0.14"

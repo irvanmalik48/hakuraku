@@ -198,3 +198,12 @@ cargo fmt --all -- --check
 # Linter analysis
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+### Database Benchmarking
+
+A database benchmarking utility is included to validate PostgreSQL telemetry persistence throughput and query performance:
+
+```bash
+# Run database insertion & query benchmark
+cargo run --release --bin bench
+```

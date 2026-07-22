@@ -24,12 +24,25 @@ The workspace is divided into three crates:
    WebSockets) concurrently. Features automatic data retention cleanup,
    in-memory caching, and request rate limiting.
 
-```
-+-------------+                 +--------------+                 +------------+
-|             | -- [ gRPC ] --> |              | -- [ WebSockets / REST ] --> | Web Client |
-| pulse-agent |                 | pulse-server |                              +------------+
-|             | <-- [ Cmds ] -- |              | -- [ SQLite WAL DB ]
-+-------------+                 +--------------+
+```mermaid
+graph LR
+    subgraph Client ["Client Layer"]
+        WC["Web Client"]
+    end
+
+    subgraph Core ["Hakuraku Central Server"]
+        SV["Hakuraku Server"]
+        DB[("SQLite WAL DB")]
+    end
+
+    subgraph Daemon ["Hakuraku Daemon"]
+        AG["Hakuraku Agent"]
+    end
+
+    AG -- "gRPC Telemetry" --> SV
+    SV -- "Server Commands" --> AG
+    SV -- "WebSockets / REST" --> WC
+    SV -- "SQL Write/Read" --> DB
 ```
 
 ---

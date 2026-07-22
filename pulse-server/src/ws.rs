@@ -41,11 +41,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, filter_node_id: Optio
     let initial_state: Vec<serde_json::Value> = state
         .nodes
         .iter()
-        .filter(|entry| {
-            filter_node_id
-                .as_ref()
-                .is_none_or(|f| f == entry.key())
-        })
+        .filter(|entry| filter_node_id.as_ref().is_none_or(|f| f == entry.key()))
         .map(|entry| {
             let node = entry.value();
             serde_json::json!({
@@ -65,9 +61,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, filter_node_id: Optio
     });
 
     if let Ok(json) = serde_json::to_string(&init_msg)
-        && sender.send(Message::Text(json.into())).await.is_err() {
-            return;
-        }
+        && sender.send(Message::Text(json.into())).await.is_err()
+    {
+        return;
+    }
 
     // Spawn a task to forward broadcast updates to the WebSocket
     let filter_clone = filter_node_id.clone();
@@ -77,9 +74,10 @@ async fn handle_socket(socket: WebSocket, state: AppState, filter_node_id: Optio
                 Ok(update) => {
                     // Apply node filter if specified
                     if let Some(ref filter) = filter_clone
-                        && &update.node_id != filter {
-                            continue;
-                        }
+                        && &update.node_id != filter
+                    {
+                        continue;
+                    }
 
                     let msg = serde_json::json!({
                         "type": "update",

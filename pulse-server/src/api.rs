@@ -144,3 +144,93 @@ fn parse_range_to_ms(range: &str) -> i64 {
         _ => 3600 * 1000, // Default to 1 hour
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use axum::Router;
+    use tower::ServiceExt;
+    use crate::state::{NodeInfo, NodeStatus};
+
+    fn get_mock_state() -> AppState {
+        let db = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
+        AppState::new(db)
+    }
+
+    #[tokio::test]
+    async fn test_api_list_nodes() {
+        let state = get_mock_state();
+        state.nodes.insert(
+            "node-test".to_string(),
+            NodeInfo {
+                node_id: "node-test".to_string(),
+                hostname: "node-test-host".to_string(),
+                last_seen_ms: 1000,
+                status: NodeStatus::Online,
+                latest_stats: Some(serde_json::json!({"cpu": 10.0})),
+            },
+        );
+
+        let app = Router::new()
+            .route("/api/v1/nodes", get(list_nodes))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/nodes")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        
+        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        
+        assert_eq!(body_json["count"], 1);
+        assert_eq!(body_json["nodes"][0]["node_id"], "node-test");
+    }
+
+    #[tokio::test]
+    async fn test_api_get_node_cache_hit() {
+        let state = get_mock_state();
+        state.nodes.insert(
+            "node-test-2".to_string(),
+            NodeInfo {
+                node_id: "node-test-2".to_string(),
+                hostname: "node-test-host-2".to_string(),
+                last_seen_ms: 2000,
+                status: NodeStatus::Online,
+                latest_stats: Some(serde_json::json!({"cpu": 20.0})),
+            },
+        );
+
+        let app = Router::new()
+            .route("/api/v1/nodes/{id}", get(get_node))
+            .with_state(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/nodes/node-test-2")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        
+        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        
+        assert_eq!(body_json["node_id"], "node-test-2");
+        assert_eq!(body_json["hostname"], "node-test-host-2");
+    }
+}

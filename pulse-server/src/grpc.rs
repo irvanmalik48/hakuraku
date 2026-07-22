@@ -62,7 +62,7 @@ impl MonitoringService for MonitoringServiceImpl {
                 let msg = match msg_result {
                     Ok(m) => m,
                     Err(e) => {
-                        warn!(error = %e, "error receiving telemetry message");
+                        warn!(error = %e, node_id = %auth_node_id, "error receiving telemetry message");
                         break;
                     }
                 };
@@ -120,10 +120,7 @@ impl MonitoringService for MonitoringServiceImpl {
                             stats_str,
                             stats_json: stats_json.clone(),
                         };
-                        if state.ingestion_tx.try_send(item).is_err() {
-                            error!(node_id = %auth_node_id, "ingestion queue full, dropping stats snapshot");
-                            crate::metrics::INGESTION_DROPS.inc();
-                        }
+                        state.send_to_worker(&auth_node_id, item);
 
                         // Broadcast to WebSocket subscribers
                         let _ = state.broadcast_tx.send(NodeUpdate {
@@ -190,10 +187,7 @@ impl MonitoringService for MonitoringServiceImpl {
                             error_message: probe.error_message.clone(),
                             timestamp: now_ms,
                         };
-                        if state.ingestion_tx.try_send(item).is_err() {
-                            error!(node_id = %auth_node_id, "ingestion queue full, dropping probe result");
-                            crate::metrics::INGESTION_DROPS.inc();
-                        }
+                        state.send_to_worker(&auth_node_id, item);
                     }
                 }
             }

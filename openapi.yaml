@@ -1,0 +1,171 @@
+openapi: 3.1.0
+info:
+  title: 伯楽 (Hakuraku) Monitoring REST API
+  description: Central ingestion and dashboard REST API for the 伯楽 (Hakuraku) system.
+  version: 0.1.0
+servers:
+  - url: /api/v1
+    description: Base path for version 1 API endpoints
+paths:
+  /nodes:
+    get:
+      summary: List monitored nodes
+      description: >
+        Returns a list of all monitored nodes with their latest
+        telemetry snapshots.
+      responses:
+        '200':
+          description: A list of nodes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    example: 1
+                  nodes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeInfo'
+        '500':
+          description: Internal server error
+  /nodes/{id}:
+    get:
+      summary: Get node details
+      description: Returns detailed state and latest metrics for a specific node.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the node
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node detailed status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeInfo'
+        '404':
+          description: Node not found
+        '500':
+          description: Internal server error
+  /nodes/{id}/history:
+    get:
+      summary: Get node telemetry history
+      description: Returns historical snapshots for a node in descending order.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique identifier of the node
+          schema:
+            type: string
+        - name: range
+          in: query
+          required: false
+          description: Time range to fetch (e.g. "1h", "6h", "24h", "7d")
+          schema:
+            type: string
+            default: "1h"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of data points to return
+          schema:
+            type: integer
+            default: 360
+      responses:
+        '200':
+          description: Historical time-series snapshots
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node_id:
+                    type: string
+                  range:
+                    type: string
+                  from_ms:
+                    type: integer
+                  to_ms:
+                    type: integer
+                  count:
+                    type: integer
+                  snapshots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SnapshotRecord'
+        '500':
+          description: Internal server error
+  /health:
+    get:
+      summary: Health check
+      description: Simple health status check of the server.
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: Server health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+                  service:
+                    type: string
+                    example: "pulse-server"
+                  version:
+                    type: string
+                    example: "0.1.0"
+components:
+  schemas:
+    NodeInfo:
+      type: object
+      required:
+        - node_id
+        - hostname
+        - last_seen_ms
+        - status
+      properties:
+        node_id:
+          type: string
+          example: "node-01"
+        hostname:
+          type: string
+          example: "node-01"
+        last_seen_ms:
+          type: integer
+          format: int64
+          example: 1721634839000
+        status:
+          type: string
+          enum: [online, offline, unknown]
+          example: "online"
+        latest_stats:
+          type: object
+          nullable: true
+          description: Full telemetry metrics snapshot
+    SnapshotRecord:
+      type: object
+      required:
+        - node_id
+        - timestamp
+        - stats_json
+      properties:
+        node_id:
+          type: string
+          example: "node-01"
+        timestamp:
+          type: integer
+          format: int64
+          example: 1721634839000
+        stats_json:
+          type: object
+          description: Metric measurements snapshot

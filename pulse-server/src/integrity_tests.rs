@@ -212,6 +212,7 @@ mod tests {
         cancel_token.cancel();
         let _ = http_handle.await;
         let _ = grpc_handle.await;
+        drop(app_state);
         let _ = worker_handle.await;
     }
 }

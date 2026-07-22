@@ -349,7 +349,10 @@ mod tests {
 
     fn get_mock_state() -> AppState {
         unsafe {
-            std::env::set_var("PULSE_AUTH_SECRET", "testsecret");
+            std::env::set_var(
+                "PULSE_AUTH_SECRET",
+                "testsecret-64-character-hex-string-for-integrity-test-321",
+            );
         }
         let db = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let (tx, _) = tokio::sync::mpsc::channel(100);
@@ -379,7 +382,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/nodes")
-                    .header("Authorization", "Bearer testsecret")
+                    .header(
+                        "Authorization",
+                        "Bearer testsecret-64-character-hex-string-for-integrity-test-321",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -419,7 +425,10 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/nodes/node-test-2")
-                    .header("Authorization", "Bearer testsecret")
+                    .header(
+                        "Authorization",
+                        "Bearer testsecret-64-character-hex-string-for-integrity-test-321",
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )

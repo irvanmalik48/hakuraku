@@ -11,6 +11,9 @@ mod metrics;
 mod state;
 mod ws;
 
+#[cfg(test)]
+mod integrity_tests;
+
 use std::time::Duration;
 
 use anyhow::{Context, Result};

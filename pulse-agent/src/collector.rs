@@ -97,12 +97,19 @@ impl SystemCollector {
             .max(0.001); // Prevent division by zero
 
         let (cpu_percent, cpu_per_core) = self.read_cpu()?;
-        let (mem_total, mem_used, mem_free, mem_available, mem_buffers, mem_cached, swap_total, swap_used) =
-            self.read_meminfo()?;
+        let (
+            mem_total,
+            mem_used,
+            mem_free,
+            mem_available,
+            mem_buffers,
+            mem_cached,
+            swap_total,
+            swap_used,
+        ) = self.read_meminfo()?;
         let (load_1, load_5, load_15) = self.read_loadavg()?;
         let net_interfaces = self.read_net_dev(elapsed_secs)?;
-        let (disk_read_bytes_sec, disk_write_bytes_sec) =
-            self.read_diskstats(elapsed_secs)?;
+        let (disk_read_bytes_sec, disk_write_bytes_sec) = self.read_diskstats(elapsed_secs)?;
         let (tcp_connections, udp_connections) = self.read_connections()?;
         let uptime_seconds = self.read_uptime()?;
         let temperatures = self.read_temperatures()?;
@@ -334,17 +341,16 @@ impl SystemCollector {
             let rx_bytes_total = fields[0];
             let tx_bytes_total = fields[8];
 
-            let (rx_bytes_sec, tx_bytes_sec) =
-                if let Some(prev) = self.prev_net.get(iface_name) {
-                    let rx_delta = rx_bytes_total.saturating_sub(prev.rx_bytes);
-                    let tx_delta = tx_bytes_total.saturating_sub(prev.tx_bytes);
-                    (
-                        (rx_delta as f64 / elapsed_secs) as u64,
-                        (tx_delta as f64 / elapsed_secs) as u64,
-                    )
-                } else {
-                    (0, 0)
-                };
+            let (rx_bytes_sec, tx_bytes_sec) = if let Some(prev) = self.prev_net.get(iface_name) {
+                let rx_delta = rx_bytes_total.saturating_sub(prev.rx_bytes);
+                let tx_delta = tx_bytes_total.saturating_sub(prev.tx_bytes);
+                (
+                    (rx_delta as f64 / elapsed_secs) as u64,
+                    (tx_delta as f64 / elapsed_secs) as u64,
+                )
+            } else {
+                (0, 0)
+            };
 
             self.prev_net.insert(
                 iface_name.to_string(),
@@ -442,15 +448,15 @@ impl SystemCollector {
 
     fn read_uptime(&mut self) -> Result<u64> {
         self.read_file("/proc/uptime")?;
-        let uptime_str = self
-            .buf
-            .split_whitespace()
-            .next()
-            .ok_or_else(|| CollectorError::Parse {
-                path: "/proc/uptime".into(),
-                field: "uptime".into(),
-                detail: "empty file".into(),
-            })?;
+        let uptime_str =
+            self.buf
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| CollectorError::Parse {
+                    path: "/proc/uptime".into(),
+                    field: "uptime".into(),
+                    detail: "empty file".into(),
+                })?;
 
         let uptime: f64 = uptime_str.parse().map_err(|_| CollectorError::Parse {
             path: "/proc/uptime".into(),
@@ -488,12 +494,13 @@ impl SystemCollector {
                 .to_string();
 
             if let Ok(temp_str) = std::fs::read_to_string(&temp_path)
-                && let Ok(temp) = temp_str.trim().parse::<i32>() {
-                    sensors.push(TemperatureSensor {
-                        label,
-                        temp_millicelsius: temp,
-                    });
-                }
+                && let Ok(temp) = temp_str.trim().parse::<i32>()
+            {
+                sensors.push(TemperatureSensor {
+                    label,
+                    temp_millicelsius: temp,
+                });
+            }
         }
 
         Ok(sensors)

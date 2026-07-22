@@ -77,10 +77,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        db: PgPool,
-        worker_txs: Arc<Vec<tokio::sync::mpsc::Sender<IngestionItem>>>,
-    ) -> Self {
+    pub fn new(db: PgPool, worker_txs: Arc<Vec<tokio::sync::mpsc::Sender<IngestionItem>>>) -> Self {
         // Buffer up to 256 updates in the broadcast channel
         let (broadcast_tx, _) = broadcast::channel(256);
         Self {

@@ -353,7 +353,8 @@ mod tests {
         }
         let db = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
         let (tx, _) = tokio::sync::mpsc::channel(100);
-        AppState::new(db, tx)
+        let worker_txs = std::sync::Arc::new(vec![tx]);
+        AppState::new(db, worker_txs)
     }
 
     #[tokio::test]

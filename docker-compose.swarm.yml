@@ -2,8 +2,6 @@
 # Deploy to Docker Swarm:
 # docker stack deploy -c docker-compose.swarm.yml hakuraku
 
-version: "3.8"
-
 services:
   postgres:
     image: postgres:18-alpine

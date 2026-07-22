@@ -15,8 +15,8 @@ pub mod proto {
 
 // Re-export commonly used types at crate root for ergonomics.
 pub use proto::{
-    monitoring_service_client::MonitoringServiceClient,
-    monitoring_service_server::{MonitoringService, MonitoringServiceServer},
     ConfigUpdate, Heartbeat, HeartbeatAck, NetworkInterface, NodeStats, PingTarget, ProbeResult,
     ServerCommand, TcpProbe, TelemetryMessage, TemperatureSensor,
+    monitoring_service_client::MonitoringServiceClient,
+    monitoring_service_server::{MonitoringService, MonitoringServiceServer},
 };

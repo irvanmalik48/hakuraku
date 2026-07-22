@@ -223,6 +223,7 @@ impl SystemCollector {
 
     // ── /proc/meminfo ───────────────────────────────────────────────────────
 
+    #[allow(clippy::type_complexity)]
     fn read_meminfo(&mut self) -> Result<(u64, u64, u64, u64, u64, u64, u64, u64)> {
         self.read_file("/proc/meminfo")?;
 

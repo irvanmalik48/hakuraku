@@ -76,45 +76,64 @@ async fn main() -> Result<()> {
     run_agent_loop(config).await
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio_util::sync::CancellationToken;
+
 /// Main agent loop with exponential backoff reconnection.
 async fn run_agent_loop(config: Config) -> Result<()> {
     let mut backoff = ExponentialBackoff::new();
     let holdback = Arc::new(Mutex::new(TelemetryBuffer::new(100)));
     let notify = Arc::new(Notify::new());
 
+    // Shared atomic collection interval
+    let interval_ms = Arc::new(AtomicU64::new(config.interval.as_millis() as u64));
+
     // Spawn the metric collection task
     let collector_handle = {
         let node_id = config.node_id.clone();
-        let interval = config.interval;
+        let interval_ms = interval_ms.clone();
         let holdback = holdback.clone();
         let notify = notify.clone();
         tokio::spawn(async move {
-            collection_loop(node_id, interval, holdback, notify).await;
+            collection_loop(node_id, interval_ms, holdback, notify).await;
         })
     };
 
+    let cancel_token = CancellationToken::new();
+    let cancel_token_clone = cancel_token.clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        info!("Ctrl-C received, shutting down agent...");
+        cancel_token_clone.cancel();
+    });
+
     let result = async {
         loop {
-            match run_session(&config, &holdback, &notify).await {
-                Ok(()) => {
-                    info!("session ended cleanly, reconnecting...");
-                    backoff.reset();
+            tokio::select! {
+                res = run_session(&config, &holdback, &notify, interval_ms.clone(), cancel_token.clone()) => {
+                    match res {
+                        Ok(()) => {
+                            info!("session ended cleanly, reconnecting...");
+                            backoff.reset();
+                        }
+                        Err(e) => {
+                            let delay = backoff.next_delay();
+                            warn!(
+                                error = %e,
+                                retry_in_ms = delay.as_millis() as u64,
+                                "session failed, reconnecting after backoff"
+                            );
+                            tokio::select! {
+                                _ = tokio::time::sleep(delay) => {}
+                                _ = cancel_token.cancelled() => {}
+                            }
+                        }
+                    }
                 }
-                Err(e) => {
-                    let delay = backoff.next_delay();
-                    warn!(
-                        error = %e,
-                        retry_in_ms = delay.as_millis() as u64,
-                        "session failed, reconnecting after backoff"
-                    );
-                    tokio::time::sleep(delay).await;
+                _ = cancel_token.cancelled() => {
+                    info!("shutdown signal received, exiting agent loop");
+                    break;
                 }
-            }
-
-            // Check for shutdown signal between reconnection attempts
-            if tokio::signal::ctrl_c().now_or_never().is_some() {
-                info!("shutdown signal received, exiting");
-                break;
             }
         }
         Ok(())
@@ -130,6 +149,8 @@ async fn run_session(
     config: &Config,
     holdback: &Arc<Mutex<TelemetryBuffer>>,
     notify: &Arc<Notify>,
+    interval_ms_shared: Arc<AtomicU64>,
+    cancel_token: CancellationToken,
 ) -> Result<()> {
     // Connect to server
     let channel = Channel::from_shared(config.server_addr.clone())?
@@ -199,52 +220,63 @@ async fn run_session(
     let mut inbound = response.into_inner();
 
     // Process incoming server commands
-    while let Some(cmd) = inbound
-        .message()
-        .await
-        .context("error reading server command")?
-    {
-        if let Some(payload) = cmd.payload {
-            match payload {
-                pulse_core::proto::server_command::Payload::HeartbeatAck(ack) => {
-                    tracing::debug!(
-                        server_time = ack.server_timestamp_ms,
-                        "heartbeat acknowledged"
-                    );
-                }
-                pulse_core::proto::server_command::Payload::ConfigUpdate(update) => {
-                    info!(
-                        interval_ms = update.interval_ms,
-                        "received config update (dynamic interval change not yet implemented)"
-                    );
-                }
-                pulse_core::proto::server_command::Payload::AddTcpProbe(probe) => {
-                    info!(
-                        host = %probe.host,
-                        port = probe.port,
-                        "received TCP probe command"
-                    );
-                    let tx_clone = tx.clone();
-                    tokio::spawn(async move {
-                        let results = prober::probe_tcp_targets(&[(
-                            probe.host.clone(),
-                            probe.port as u16,
-                            probe.timeout_ms,
-                        )])
-                        .await;
-                        if let Some(result) = results.into_iter().next() {
-                            let msg = TelemetryMessage {
-                                payload: Some(Payload::ProbeResult(result)),
-                            };
-                            if let Err(e) = tx_clone.send(msg).await {
-                                tracing::error!(error = %e, "failed to send probe result to telemetry channel");
-                            }
+    loop {
+        tokio::select! {
+            cmd_res = inbound.message() => {
+                let cmd = match cmd_res {
+                    Ok(Some(c)) => c,
+                    Ok(None) => break, // Stream closed by server
+                    Err(e) => return Err(anyhow::anyhow!("error reading server command: {}", e)),
+                };
+
+                if let Some(payload) = cmd.payload {
+                    match payload {
+                        pulse_core::proto::server_command::Payload::HeartbeatAck(ack) => {
+                            tracing::debug!(
+                                server_time = ack.server_timestamp_ms,
+                                "heartbeat acknowledged"
+                            );
                         }
-                    });
+                        pulse_core::proto::server_command::Payload::ConfigUpdate(update) => {
+                            info!(
+                                interval_ms = update.interval_ms,
+                                "received config update, updating collection interval"
+                            );
+                            interval_ms_shared.store(update.interval_ms as u64, Ordering::Relaxed);
+                        }
+                        pulse_core::proto::server_command::Payload::AddTcpProbe(probe) => {
+                            info!(
+                                host = %probe.host,
+                                port = probe.port,
+                                "received TCP probe command"
+                            );
+                            let tx_clone = tx.clone();
+                            tokio::spawn(async move {
+                                let results = prober::probe_tcp_targets(&[(
+                                    probe.host.clone(),
+                                    probe.port as u16,
+                                    probe.timeout_ms,
+                                )])
+                                .await;
+                                if let Some(result) = results.into_iter().next() {
+                                    let msg = TelemetryMessage {
+                                        payload: Some(Payload::ProbeResult(result)),
+                                    };
+                                    if let Err(e) = tx_clone.send(msg).await {
+                                        tracing::error!(error = %e, "failed to send probe result to telemetry channel");
+                                    }
+                                }
+                            });
+                        }
+                        _ => {
+                            tracing::debug!("received unhandled server command");
+                        }
+                    }
                 }
-                _ => {
-                    tracing::debug!("received unhandled server command");
-                }
+            }
+            _ = cancel_token.cancelled() => {
+                info!("session cancelled due to shutdown");
+                break;
             }
         }
     }
@@ -259,17 +291,15 @@ async fn run_session(
 /// Continuously collect system metrics and push them to the holdback buffer.
 async fn collection_loop(
     node_id: String,
-    interval: Duration,
+    interval_ms: Arc<AtomicU64>,
     holdback: Arc<Mutex<TelemetryBuffer>>,
     notify: Arc<Notify>,
 ) {
     let mut collector = SystemCollector::new();
-    let mut ticker = tokio::time::interval(interval);
-    // Don't burst-catch-up if we fall behind
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
-        ticker.tick().await;
+        let ms = interval_ms.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(ms)).await;
 
         match collector.collect(&node_id) {
             Ok(stats) => {
@@ -354,31 +384,4 @@ fn rand_simple() -> f64 {
         .unwrap_or_default()
         .subsec_nanos();
     (nanos as f64) / (u32::MAX as f64)
-}
-
-/// Extension trait to check if a future resolves immediately.
-trait NowOrNever {
-    type Output;
-    fn now_or_never(self) -> Option<Self::Output>;
-}
-
-impl<F: std::future::Future> NowOrNever for F {
-    type Output = F::Output;
-    fn now_or_never(self) -> Option<Self::Output> {
-        let waker = futures_noop_waker();
-        let mut cx = std::task::Context::from_waker(&waker);
-        let mut pinned = std::pin::pin!(self);
-        match pinned.as_mut().poll(&mut cx) {
-            std::task::Poll::Ready(v) => Some(v),
-            std::task::Poll::Pending => None,
-        }
-    }
-}
-
-fn futures_noop_waker() -> std::task::Waker {
-    use std::task::{RawWaker, RawWakerVTable};
-    const VTABLE: RawWakerVTable =
-        RawWakerVTable::new(|p| RawWaker::new(p, &VTABLE), |_| {}, |_| {}, |_| {});
-    // SAFETY: The no-op waker does nothing and is always valid.
-    unsafe { std::task::Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
 }

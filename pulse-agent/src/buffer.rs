@@ -57,7 +57,7 @@ mod tests {
     use super::*;
 
     fn make_msg(id: i64) -> TelemetryMessage {
-        use pulse_core::proto::{telemetry_message::Payload, Heartbeat};
+        use pulse_core::proto::{Heartbeat, telemetry_message::Payload};
         TelemetryMessage {
             payload: Some(Payload::Heartbeat(Heartbeat {
                 node_id: "test".into(),

@@ -25,10 +25,13 @@ mod tests {
             .unwrap_or_else(|_| "postgres://pulse:password@localhost:5432/pulse".to_string());
 
         // 2. Connect to database and clear test node data (skip if offline/unreachable)
-        let pool = match sqlx::PgPool::connect(&database_url).await {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("skipping E2E integrity test: database unreachable ({})", e);
+        let pool = match tokio::time::timeout(
+            Duration::from_millis(500),
+            sqlx::PgPool::connect(&database_url)
+        ).await {
+            Ok(Ok(p)) => p,
+            _ => {
+                eprintln!("skipping E2E integrity test: database unreachable");
                 return;
             }
         };
@@ -202,6 +205,8 @@ mod tests {
         assert_eq!(first_node["latest_stats"]["cpu_percent"], 42.42);
 
         // 9. Shutdown gracefully
+        drop(inbound_stream);
+        drop(client);
         cancel_token.cancel();
         let _ = http_handle.await;
         let _ = grpc_handle.await;

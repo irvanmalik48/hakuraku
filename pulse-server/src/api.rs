@@ -148,12 +148,12 @@ fn parse_range_to_ms(range: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{NodeInfo, NodeStatus};
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use axum::Router;
     use tower::ServiceExt;
-    use crate::state::{NodeInfo, NodeStatus};
 
     fn get_mock_state() -> AppState {
         let db = sqlx::PgPool::connect_lazy("postgres://localhost/test").unwrap();
@@ -189,10 +189,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        
-        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
         let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        
+
         assert_eq!(body_json["count"], 1);
         assert_eq!(body_json["nodes"][0]["node_id"], "node-test");
     }
@@ -226,10 +228,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        
-        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+
+        let body_bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
         let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-        
+
         assert_eq!(body_json["node_id"], "node-test-2");
         assert_eq!(body_json["hostname"], "node-test-host-2");
     }

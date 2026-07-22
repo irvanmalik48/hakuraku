@@ -1,8 +1,29 @@
 # 伯楽 (Hakuraku) Monitoring — Docker Compose
-# Multi-service deployment: Server and optional Agent.
+# Multi-service deployment: Server, optional Agent, and PostgreSQL 18 database.
 # Relies on an external Caddy reverse proxy on the 'caddy_mesh' network.
 
 services:
+  # Central database storage using PostgreSQL 18
+  postgres:
+    image: postgres:18-alpine
+    container_name: pulse-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=pulse
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=pulse
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - caddy_mesh
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse -d pulse || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Central telemetry ingestion and dashboard API server
   pulse-server:
     build:
@@ -12,14 +33,15 @@ services:
     restart: unless-stopped
     environment:
       - PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}
-      - DATABASE_URL=sqlite:///data/pulse.db
+      - DATABASE_URL=postgres://pulse:password@postgres:5432/pulse
       - PULSE_GRPC_PORT=50051
       - PULSE_HTTP_PORT=3000
       - RUST_LOG=pulse_server=info
-    volumes:
-      - pulse_data:/data
     networks:
       - caddy_mesh
+    depends_on:
+      postgres:
+        condition: service_healthy
     expose:
       - "50051"
       - "3000"
@@ -60,5 +82,5 @@ networks:
     external: true
 
 volumes:
-  pulse_data:
+  pg_data:
     driver: local

@@ -13,11 +13,11 @@ services:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=pulse
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - pg_data:/var/lib/postgresql
     networks:
       - caddy_mesh
-    expose:
-      - "5432"
+    ports:
+      - "54321:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pulse -d pulse || exit 1"]
       interval: 10s
@@ -32,7 +32,7 @@ services:
     container_name: pulse-server
     restart: unless-stopped
     environment:
-      - PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}
+      - "PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}"
       - DATABASE_URL=postgres://pulse:password@postgres:5432/pulse
       - PULSE_GRPC_PORT=50051
       - PULSE_HTTP_PORT=3000
@@ -60,7 +60,7 @@ services:
     container_name: pulse-agent
     restart: unless-stopped
     environment:
-      - PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}
+      - "PULSE_AUTH_SECRET=${PULSE_AUTH_SECRET:?error: PULSE_AUTH_SECRET must be set}"
       - PULSE_SERVER_ADDR=http://pulse-server:50051
       - PULSE_NODE_ID=${PULSE_NODE_ID:-docker-agent-01}
       - PULSE_INTERVAL_MS=${PULSE_INTERVAL_MS:-1000}

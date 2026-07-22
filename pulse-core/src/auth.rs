@@ -28,8 +28,7 @@ const MAX_CLOCK_SKEW: i64 = 60;
 /// The signed message is `"{node_id}:{timestamp}"`.
 pub fn sign_request(secret: &[u8], node_id: &str, timestamp: i64) -> String {
     let message = format!("{node_id}:{timestamp}");
-    let mut mac =
-        HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(message.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
@@ -49,13 +48,15 @@ pub fn verify_request(
 
     let drift = (now - timestamp).abs();
     if drift > MAX_CLOCK_SKEW {
-        return Err(AuthError::ExpiredTimestamp { drift, max: MAX_CLOCK_SKEW });
+        return Err(AuthError::ExpiredTimestamp {
+            drift,
+            max: MAX_CLOCK_SKEW,
+        });
     }
 
     // Verify HMAC
     let message = format!("{node_id}:{timestamp}");
-    let mut mac =
-        HmacSha256::new_from_slice(secret).map_err(|_| AuthError::InvalidKey)?;
+    let mut mac = HmacSha256::new_from_slice(secret).map_err(|_| AuthError::InvalidKey)?;
     mac.update(message.as_bytes());
 
     let expected = hex::decode(signature).map_err(|_| AuthError::InvalidSignature)?;
@@ -71,13 +72,12 @@ pub struct AuthInterceptor {
 
 impl AuthInterceptor {
     pub fn new(secret: impl Into<Vec<u8>>) -> Self {
-        Self { secret: secret.into() }
+        Self {
+            secret: secret.into(),
+        }
     }
 
-    fn extract_header(
-        request: &tonic::Request<()>,
-        key: &str,
-    ) -> Result<String, AuthError> {
+    fn extract_header(request: &tonic::Request<()>, key: &str) -> Result<String, AuthError> {
         request
             .metadata()
             .get(key)
@@ -89,10 +89,7 @@ impl AuthInterceptor {
 }
 
 impl Interceptor for AuthInterceptor {
-    fn call(
-        &mut self,
-        request: tonic::Request<()>,
-    ) -> Result<tonic::Request<()>, tonic::Status> {
+    fn call(&mut self, request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
         let node_id = Self::extract_header(&request, "x-pulse-node-id")
             .map_err(|e| tonic::Status::unauthenticated(e.to_string()))?;
         let timestamp_str = Self::extract_header(&request, "x-pulse-timestamp")
@@ -129,7 +126,9 @@ pub fn inject_auth_headers(
     let metadata = request.metadata_mut();
     metadata.insert(
         "x-pulse-node-id",
-        node_id.parse().map_err(|_| tonic::Status::internal("invalid node id"))?,
+        node_id
+            .parse()
+            .map_err(|_| tonic::Status::internal("invalid node id"))?,
     );
     metadata.insert(
         "x-pulse-timestamp",

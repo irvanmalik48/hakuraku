@@ -27,7 +27,9 @@ where
         };
 
         // 1. Authorization: Bearer <token>
-        if let Some(token) = parts.headers.get(axum::http::header::AUTHORIZATION)
+        if let Some(token) = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
             .and_then(|h| h.to_str().ok())
             .and_then(|s| s.strip_prefix("Bearer "))
             .filter(|tok| validate_token(tok.trim(), &secret))
@@ -37,7 +39,9 @@ where
         }
 
         // 2. x-pulse-auth-token header
-        if let Some(token_str) = parts.headers.get("x-pulse-auth-token")
+        if let Some(token_str) = parts
+            .headers
+            .get("x-pulse-auth-token")
             .and_then(|h| h.to_str().ok())
             .filter(|tok| validate_token(tok.trim(), &secret))
         {

@@ -80,7 +80,10 @@ pub static DB_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
     let opts = HistogramOpts::new(
         "db_query_duration_seconds",
         "Database query duration in seconds",
-    );
+    )
+    .buckets(vec![
+        0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
+    ]);
     let h = HistogramVec::new(opts, &["operation"]).unwrap();
     REGISTRY.register(Box::new(h.clone())).unwrap();
     h

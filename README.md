@@ -1,13 +1,8 @@
 # 伯楽 (Hakuraku) Monitoring System
 
-伯楽 (Hakuraku) is a high-throughput system monitoring and telemetry collection suite
-written in Rust. It consists of a lightweight daemon (agent) that collects host
-metrics and a central server that ingests telemetry via gRPC, stores it in an
-optimized PostgreSQL 18 database, and exposes data through a REST API and a real-time
-WebSocket broadcast channel.
+伯楽 (Hakuraku) is an enterprise-grade, high-throughput system monitoring and telemetry collection suite written in Rust. Engineered for peak performance, it consists of a lightweight daemon (agent) that collects system metrics and a central server that ingests telemetry via gRPC, stores it in an optimized PostgreSQL 18 database (with optional VictoriaMetrics time-series integration), and exposes data through a secure REST API and a real-time WebSocket broadcast channel.
 
-The system uses a size-optimized workspace design, compiles static binaries with
-Full Link-Time Optimization (LTO), and runs inside minimal container images.
+Built with modern Rust practices, the system uses a size-optimized workspace design, compiles static musl binaries with Full Link-Time Optimization (LTO), and runs inside minimal, hardened container images.
 
 ---
 

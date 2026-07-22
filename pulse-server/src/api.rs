@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
 
-use crate::db::{NodeRepository, SqliteNodeRepository};
+use crate::db::{NodeRepository, PostgresNodeRepository};
 use crate::state::AppState;
 
 /// Query parameters for the history endpoint.
@@ -69,7 +69,7 @@ pub async fn get_node(
     }
 
     // Fallback: Check the database directly
-    let repo = SqliteNodeRepository::new(state.db.clone());
+    let repo = PostgresNodeRepository::new(state.db.clone());
     match repo.get_node(&node_id).await {
         Ok(Some(n)) => {
             // Populate the in-memory cache
@@ -96,7 +96,7 @@ pub async fn get_node_history(
     Path(node_id): Path<String>,
     Query(params): Query<HistoryQuery>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let repo = SqliteNodeRepository::new(state.db.clone());
+    let repo = PostgresNodeRepository::new(state.db.clone());
 
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

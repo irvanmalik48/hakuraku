@@ -1,0 +1,8 @@
+[build]
+# Default target for `cargo build` — uncomment for MUSL static builds
+# target = "x86_64-unknown-linux-musl"
+
+[target.x86_64-unknown-linux-musl]
+# Use the system linker on Alpine (musl-dev provides it)
+linker = "gcc"
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -92,3 +92,47 @@ jobs:
           tags: irvanmalik48/pulse-agent:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  build:
+    name: Build & Upload Release Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Protobuf Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      - name: Build Release Binaries
+        run: cargo build --release --workspace
+
+      - name: Upload pulse-server Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulse-server-binary
+          path: target/release/pulse-server
+          if-no-files-found: error
+
+      - name: Upload pulse-agent Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulse-agent-binary
+          path: target/release/pulse-agent
+          if-no-files-found: error
+

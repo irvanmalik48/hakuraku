@@ -53,14 +53,15 @@ graph TD
 
 ## Key Features
 
-- **Ingestion & Backpressure**: Bounded worker pool ingestion queue (`mpsc::channel`) on the server prevents connection pool starvation. Sub-millisecond overhead.
-- **Authentication**: HMAC-SHA256 payload signing with timestamp drift checking on gRPC. Bearer token / apiKey header verification on all REST/WebSocket API routes.
+- **Ingestion & Backpressure**: Sharded worker pool ingestion queue (`worker_txs`) routes telemetry items by hashing the `node_id` to eliminate lock contention on database writes. Concurrency limits on VictoriaMetrics pushes are enforced via an async semaphore to prevent memory exhaustion under burst loads.
+- **Authentication**: HMAC-SHA256 payload signing with timestamp drift checking and random hex nonce replay protection (tracked on-server to prevent double-submit within the skew window). Bearer token / apiKey header verification on all REST/WebSocket API routes.
 - **Reliability**: A bounded circular holdback buffer in the agent that caches telemetry during network dropouts and flushes it upon reconnection.
 - **Node Liveness & Lifecycle**: Background liveness thread checks node heartbeats and marks inactive agents `offline` in the database and broadcasts the event.
 - **Rate Limiting**: IP-based rate limiting on the REST API and WebSocket routes.
 - **Graceful Shutdown**: Servers, checkers, and database worker threads coordinate shutdown using cancellation tokens to cleanly drain the ingestion queues.
 - **Observability**: Prometheus-compatible `/metrics` endpoint measuring HTTP requests, gRPC streams, DB queries, queue depths, and connection states.
 - **Data Retention**: Background worker that purges PostgreSQL snapshots and probe results older than 7 days based on telemetry timestamps.
+- **Container Health checks**: The agent supports container liveness checks via `/pulse-agent --health-check`, returning exit code 0 if `/proc/stat` is readable, or 1 on failure.
 
 ---
 
@@ -152,7 +153,8 @@ Pushed by agents on port `50051`.
 - **Authentication Headers**:
   - `x-pulse-node-id`: The identifier of the reporting agent. Must match the payload node_id.
   - `x-pulse-timestamp`: Current Unix timestamp in seconds.
-  - `x-pulse-signature`: Hex-encoded HMAC-SHA256 signature of the node ID and timestamp.
+  - `x-pulse-nonce`: Random 16-byte hex-encoded nonce generated unique to this request.
+  - `x-pulse-signature`: Hex-encoded HMAC-SHA256 signature of the node ID, timestamp, and nonce.
 
 ### REST API (Port `3000`)
 

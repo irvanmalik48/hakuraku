@@ -1,0 +1,25 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+
+# SQLite databases (local dev)
+*.db
+*.db-shm
+*.db-wal
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
